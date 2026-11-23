@@ -8,7 +8,7 @@
 - **셀러 배치도 (`/cellar`):** `삼성 → LG → 냉장고 신선 → 거실` 순 물리적 수직 캐비닛(아래 `1-1`부터 위로 적층), InVintory 스타일 멀티 컬러 점유 바, 정원 초과 경고 배지(`-N`), 1탭 위치 이동 피커, 선반 CRUD
 - **소비 · 선물 이력 (`/history`):** 소비(`CONSUMED`) / 선물·양도(`GIFTED`) 분리 월별 타임라인, 이력 수정, 오조작 복구(`[↩️ 보유 복원]`)
 - **통계 대시보드 (`/stats`):** 현재 보유, **관리 기준일(`2023-02-18`) 이후 누적 지출(`From_230218`)**, 누적 소비/선물 분리 KPI, Recharts 인터랙티브 4종 차트(클릭 시 목록 필터 드릴다운)
-- **프라이버시 모드(`👁️`) & 라이트/다크 모드:** 상단 토글 1탭으로 모든 가격·외화 메모·가격대 차트 즉시 마스킹
+- **프라이버시 모드(`👁️`) & 라이트/다크 모드:** 상단 토글 1탭으로 모든 가격·외화 메모·비고/메모 원문·가격대 차트 즉시 마스킹
 - **오프라인 캐시 · 충돌 방지 · 주 1회 자동 백업:** IndexedDB 0.5초 즉시 조회, 1시간 토큰 만료 시 1클릭 재인증, 저장 직전 `modifiedTime` 낙관적 잠금, 7일 경과 시 `JH_Wine_Forest/backups/` 자동 스냅샷 백업
 - **로컬 테스트 모드 병행:** Google OAuth Client ID 없이도 IndexedDB 기반 `LocalOnlyAdapter`로 데모 데이터 체험 및 전체 기능 검증 가능
 
@@ -46,7 +46,9 @@ npm run preview
 4. GitHub 저장소(`wine-forest`) **Settings → Secrets and variables → Actions**에서 `VITE_GOOGLE_CLIENT_ID` 시크릿을 등록합니다.
 5. **Settings → Pages → Source**를 `GitHub Actions`로 설정하고 `main` 브랜치에 push하면 자동 배포됩니다.
 
-> **참고 (Public 저장소 보안):** `VITE_GOOGLE_CLIENT_ID`는 SPA 빌드 결과물에 포함되는 공개 식별자이며, 실제 접근 통제는 Google Cloud Console의 승인된 JS 원본 제한과 OAuth 테스트 사용자/권한 동의로 보호됩니다. 실제 와인 데이터(`*.xlsx`, `wine_db*.json`, `migration_review*.md`, `.env.local`)는 `.gitignore`로 커밋이 차단되어 있습니다.
+> **참고 (Public 저장소 보안):** `VITE_GOOGLE_CLIENT_ID`는 SPA 빌드 결과물에 포함되는 공개 식별자이며, 실제 접근 통제는 Google Cloud Console의 승인된 JS 원본 제한과 OAuth 테스트 사용자/권한 동의로 보호됩니다. 실제 와인 데이터(`*.xlsx`, `wine_db*.json`, `migration_review*.md`, `*.local.json`, `.env.local`)는 `.gitignore`로 커밋이 차단되어 있습니다.
+>
+> **다기기(PC·스마트폰) 동기화 팁:** 데이터는 로그인한 Google 계정의 개인 Drive(`내 드라이브/JH_Wine_Forest/wine_db.json`)에 독립 저장됩니다. PC와 스마트폰에서 같은 셀러를 보려면 **동일한 Google 계정**으로 로그인해 주세요. (모바일에서 카카오톡·네이버 인앱 브라우저는 Google OAuth 팝업이 차단되므로 **Safari 또는 Chrome**에서 여는 것을 권장합니다.)
 
 ---
 
@@ -60,9 +62,10 @@ source .venv/bin/activate
 pip install -r scripts/requirements.txt
 
 python3 local_migration_script \
-  --input ~/Documents/wine_list.xlsx \
+  --input ~/Documents/wine-backup/wine_list.xlsx \
   --out-json wine_db.json \
   --out-report migration_review.md
+# (선택) 개별 단가·수량 로컬 보정 파일이 있는 경우: --overrides ~/Documents/wine-backup/migration_overrides.local.json
 ```
 
 > ⚠️ **Public 저장소 보안 주의:** 원본 `.xlsx`, `wine_db.json`, `migration_review.md`, `*.local.json`은 `.gitignore`에 차단되어 있으나, `git add -f` 같은 강제 커밋 실수를 막기 위해 **원본 엑셀과 결과물은 프로젝트 밖 개인 폴더(예: `~/Documents/wine-backup/`)에 보관**하는 것을 권장합니다.

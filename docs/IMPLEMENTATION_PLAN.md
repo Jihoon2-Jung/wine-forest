@@ -46,7 +46,8 @@
 | **T4 (빈티지 오입력 방지)** | 자동완성 선택 시 기존 빈티지 채움 + 골드 하이라이트 및 자동 포커스/선택 (`src/components/wines/QuickAddModal.tsx`) |
 | **T5 (로컬→Drive 전환)** | Drive에 기존 파일 존재 시 `[원격 불러오기]` / `[로컬로 덮어쓰기(대피 백업 후)]` / `[취소]` 모달 (`src/pages/SettingsPage.tsx`) |
 | **T6 (라이브러리·백업)** | Recharts v2.x (`^2.15.3`) 안정 버전 유지 + 백업 영구 보관 |
-| **D1~D5 (엑셀 이관)** | `판매`/`기부`→`GIFTED`, `분실`→`CONSUMED`, 불확실 날짜 추정, 미확인 위치 미지정 처리, 개별 단가 보정 및 산지 오기재 교정 완료 후 일회성 이관 스크립트 로컬 아카이브 |
+| **D1~D5 (엑셀 이관)** | `판매`/`기부`→`GIFTED`, `분실`→`CONSUMED`, 불확실 날짜 추정, 미확인 위치 미지정 처리, 개별 단가 보정(로컬 보정 파일 분리) 및 산지 오기재 교정 완료 후 일회성 이관 스크립트 로컬 아카이브 |
+| **다기기 동기화 원칙** | 로그인한 Google 계정의 개인 Drive(`JH_Wine_Forest/wine_db.json`)에 독립 저장되므로, PC·스마트폰 등 여러 기기 동기화 시 동일 Google 계정 로그인 필수 (모바일은 Safari/Chrome 사용 권장) |
 
 ---
 
@@ -54,4 +55,4 @@
 
 - **Milestone 1~4 (웹앱 풀스택 SPA/PWA):** 완료 (`src/` 전체 + `public/` 아이콘 + Tailwind/CSS 변수)
 - **Milestone 5 (엑셀 마이그레이션):** `일회성 로컬 이관 스크립트` 실행 → `wine_db.json` (초기 이관 완료 · 3단계 산지 · 미분류 0건 · 소비일 결측 0건 · 선반 24개) 및 `migration_review.md` 생성, Zod 통과
-- **Milestone 6 (CI/CD · 테스트 · 빌드):** `.github/workflows/deploy.yml`, `README.md`, `npm run typecheck` (0 errors), `npm run test` (4 suites / 13 tests pass), `npm run build` (0 warnings, PWA `dist/sw.js` 생성)
+- **Milestone 6 (CI/CD · 테스트 · 실배포):** `.github/workflows/deploy.yml`(`build`/`deploy` 2개 Job 분리, `actions/upload-pages-artifact@v4`, `actions/deploy-pages@v4`), `README.md`, `npm run typecheck` (0 errors), `npm run test` (4 suites / 13 tests pass), `npm run build` (0 warnings, PWA `dist/sw.js` 생성), GitHub Pages 프로덕션 배포 및 PC·스마트폰 Google Drive 동기화 검증 완료

@@ -176,7 +176,7 @@ export interface StorageAdapter {
   * `색` (`F`) → `R | W | SP | SW | RO` 대문자 정규화 (예외값 시 검수 리포트 기록)
   * `빈티지` (`G`) → 4자리 연도 문자열 또는 `NV`
   * `수량` (`H`) → 현재 보유(`IN_STOCK`) 병 수 $N$
-  * `구매금액` (`I`) → 병당 원화 정수 `purchasePrice` (비고에 합리적 개별 단가가 명시된 행은 개별 병 단가 추정 적용; 큰 차이/바우처 메모 행은 원가 유지 + 비고 원문 보존)
+  * `구매금액` (`I`) → 병당 원화 정수 `purchasePrice` (비고에 합리적 개별 단가가 명시된 행은 선택적 로컬 보정 파일 `--overrides scripts/migration_overrides.local.json`으로 개별 병 단가 분할 적용; 큰 차이/바우처 메모 행은 원가 유지 + 비고 원문 보존, `*.local.json`은 `.gitignore` 차단)
   * `위치` (`K`) → `locationId` 매핑 (`x`는 소비완료, `xxx??`/공백/분실의심 보유 병은 미지정 `null` 처리)
   * `비고(추가는 앞에쓸것)` (`L`) → `memo` 보관 + **좌측=최신 소비 이벤트 규칙**으로 개별 소비일·모임·선물/판매/기부(`GIFTED`)·분실(`CONSUMED`)·용량(`250ml`/`375ml HB`/`500ml`/`1500ml`)·외화 메모(`fxNote`) 자동 파싱
   * `첫소비일` (`M`) → `YYMMDD` 정규화 (`230600`→`2023-06-01`, `220000`→`2022-01-01`, `230000`→`2023-01-01`, 불확실 날짜 추정 규칙 적용)
@@ -199,11 +199,15 @@ export interface StorageAdapter {
 
 ### 6.4 스크립트 실행 방법 및 산출물 2종
 ```bash
-python local_migration_script --input wine_list.xlsx --out-json wine_db.json --out-report migration_review.md
+python3 local_migration_script \
+  --input ~/Documents/wine-backup/wine_list.xlsx \
+  --out-json wine_db.json \
+  --out-report migration_review.md
+# (선택) 로컬 보정 파일이 있는 경우: --overrides ~/Documents/wine-backup/migration_overrides.local.json
 ```
 1. **`wine_db.json`:** 웹앱 `JSON 가져오기`로 즉시 임포트 가능한 스키마 v1 준수 JSON.
 2. **`migration_review.md`:** 추후 보정이 필요한 항목만 카테고리별로 정리한 리포트:
-   * `[정합성 검증표]` 엑셀 원본 헤더 합계(`총 병수`, `총 금액`, `230218이후총금액`) vs 변환 JSON 집계 비교 (차액 `0원` 확인)
+   * `[정합성 검증표]` 엑셀 원본 헤더 합계(`총 병수`, `총 금액`, `230218이후총금액`) vs 변환 JSON 집계 비교 (**보정 전 원본 기준 0원 일치 확인** + 개별 단가 분할/수량 보정 오버라이드 적용 시 의도된 차액 근거 병기)
    * `[날짜 미상/확인필요]` `구입일`이 `?`이거나 `구입일확인필요` 메모가 있는 행
    * `[복수 구매처·단가 혼재 의심]` `비고`에 `추가`, `+`, `*`, 다중 구매처(`,`) 등이 있는 행
    * `[미확인 위치]` 보유 수량 > 0이나 `위치`가 `xxx??`, `x`, 공백, 미등록 선반인 행
@@ -241,7 +245,7 @@ wine-forest/
 │   └── requirements.txt            # openpyxl
 ├── src/
 │   ├── components/
-│   │   ├── common/                 # PriceText, WineColorBadge, WineThumbnail, BottomSheet, ConflictModal, SyncBadge
+│   │   ├── common/                 # PriceText(FxNoteText·MemoText 포함), WineColorBadge, WineThumbnail, BottomSheet, ConflictModal, SyncBadge, ToastBar
 │   │   ├── layout/                 # AppShell, TopHeader, BottomNav, DesktopSidebar, FabButton
 │   │   ├── wines/                  # WineGroupCard, WineDetailSheet, BottleRow, FilterBar, QuickAddModal, QuickConsumeModal
 │   │   ├── cellar/                 # ShelfCard, ShelfDetailDrawer, MoveBottlePicker, ShelfConfigModal (배치도는 CellarMapPage 통합)
@@ -270,11 +274,15 @@ wine-forest/
 │   ├── styles/
 │   │   └── tokens.css              # Light/Dark CSS 변수 + Wine Color 시맨틱 토큰
 │   ├── types/
+│   │   ├── gis.d.ts                # Google Identity Services 전역 타입 선언
 │   │   ├── schema.ts               # WineDatabase TypeScript 타입
 │   │   └── validation.ts           # Zod 런타임 검증 스키마
 │   ├── App.tsx                     # HashRouter + 테마 초기화 + GIS 스크립트 로더
-│   └── main.tsx
+│   ├── index.css                   # Tailwind 진입점 + tokens.css 임포트
+│   ├── main.tsx
+│   └── vite-env.d.ts               # Vite 클라이언트/환경변수 타입 선언
 ├── tests/
+│   ├── setup.ts                    # Testing Library & ResizeObserver 테스트 환경 설정
 │   ├── privacyMode.test.tsx        # 가격·외화·메모·차트 프라이버시 마스킹 검증
 │   ├── statsCalculator.test.ts     # 230218 통계, 3단계 산지, 평균가, 소비/선물 분리 검증
 │   ├── schemaValidation.test.ts    # Zod 스키마 및 FK 무결성 검증
@@ -297,8 +305,10 @@ wine-forest/
   * `base: '/wine-forest/'`
   * `VitePWA`: `registerType: 'autoUpdate'`, `manifest.name: 'JH Wine Forest'`, `manifest.short_name: 'Wine Forest'`, `manifest.theme_color: '#1B4332'`, `manifest.background_color: '#0D1411'`, `manifest.display: 'standalone'`.
 * **`.github/workflows/deploy.yml`:**
-  * `main` 브랜치 push 시 트리거.
-  * `npm ci` → `npm run test` → `npm run build` (`env: VITE_GOOGLE_CLIENT_ID: ${{ secrets.VITE_GOOGLE_CLIENT_ID }}`) → `actions/upload-pages-artifact` → `actions/deploy-pages`.
+  * `main` 브랜치 push 및 수동 실행(`workflow_dispatch`) 시 트리거.
+  * **`build` / `deploy` 2개 Job 분리 (`deploy`가 `needs: build` 의존 — 단일 Job 내 아티팩트 인덱싱 레이스 방지):**
+    * `build`: `npm ci` → `npm run typecheck` → `npm run test` → `npm run build` (`env: VITE_GOOGLE_CLIENT_ID: ${{ secrets.VITE_GOOGLE_CLIENT_ID }}`) → `actions/configure-pages@v5` → `actions/upload-pages-artifact@v4` (`path: ./dist`)
+    * `deploy`: `actions/deploy-pages@v4` (`environment: github-pages`)
   * 권한: `contents: read`, `pages: write`, `id-token: write`.
 
 ---
@@ -320,7 +330,7 @@ Antigravity(Gemini Neon)는 아래 **6개 마일스톤**을 순서대로 완료�
 
 ### Milestone 3: 글로벌 쉘, 벤치마크 기반 목록 화면 & 초고속 입출고 모달
 * `AppShell`(모바일 바텀탭 + 데스크톱 사이드바 + 상단 헤더: `👁️` 프라이버시 토글, `☀️/🌙` 테마 토글, 동기화 상태 배지) 구현.
-* `InventoryPage`: Vivino/CellarTracker 벤치마크 `WineGroupCard` + 2단계 국가/세부지역 필터 + 색상 칩 + 개별 병 펼치기/상세 시트.
+* `InventoryPage`: Vivino/CellarTracker 벤치마크 `WineGroupCard` + 3단계 국가·지역·세부지역 필터 + 색상 칩 + 개별 병 펼치기/상세 시트.
 * `QuickAddModal`(기존 와인 자동완성 + $N$병 일괄 입고) 및 `QuickConsumeModal`(소비/선물 1탭 처리).
 * `OnboardingView`(로컬 JSON Import / 빈 셀러 시작) 구현.
 * **검증:** 개발 서버에서 모바일(`390×844`) 및 데스크톱(`1440×900`) 레이아웃, 라이트/다크 전환, 프라이버시 마스킹 동작 확인.
@@ -334,7 +344,7 @@ Antigravity(Gemini Neon)는 아래 **6개 마일스톤**을 순서대로 완료�
 
 ### Milestone 5: 기존 엑셀 마이그레이션 스크립트 (`일회성 로컬 이관 스크립트`)
 * `openpyxl` 기반 `일회성 로컬 이관 스크립트` 및 `scripts/requirements.txt` 작성.
-* `와인리스트` + `셀러위치` 파싱, 2단계 국가·지역 매핑 사전, `수량`/`소비수량` 개별 병 전개, `From_230218` 매칭, `migration_review.md` 자동 생성 및 1원 단위 정합성 검증 출력 구현.
+* `와인리스트` + `셀러위치` 파싱, 3단계 국가·지역·세부지역 매핑 사전, `수량`/`소비수량` 개별 병 전개, `From_230218` 매칭, `migration_review.md` 자동 생성 및 1원 단위 정합성 검증 출력 구현.
 * **검증:** 합성 샘플 엑셀(엣지케이스: `NV`, `?` 날짜, `YYMMDD`, 다수량+부분소비, `HB`, `선물로변신`, `xxx??`, 미분류 지역 포함)로 실행해 생성된 JSON이 웹앱 Zod 스키마를 통과하는지 검증 후 임시 샘플 파일 삭제.
 
 ### Milestone 6: 최종 통합 검증, PWA 점검 및 GitHub Actions 구성
@@ -349,6 +359,6 @@ Antigravity(Gemini Neon)는 아래 **6개 마일스톤**을 순서대로 완료�
 - [x] `npm run test` 모든 단위 테스트(스키마, 230218 통계·3단계 산지, 충돌 감지, 주 1회 자동 백업, 프라이버시 마스킹) 100% 통과 (13/13)
 - [x] `npm run build` TypeScript/Vite 에러 및 경고 없이 완료, PWA 서비스워커(`dist/sw.js`) 정상 생성
 - [x] 모바일(`390×844`)과 데스크톱(`1440×900`) 양쪽에서 라이트/다크 모드 모두 대비·가독성 결함 없음 (화이트 연노랑 `#F3EED4`/`#EFEAD0` 다크 텍스트 대비 포함)
-- [x] 프라이버시 토글(`👁️`) ON 시 앱 내 모든 페이지·모달·외화 메모·차트(가격대 분포 오버레이 포함)에서 금액 정보 100% 마스킹 확인
+- [x] 프라이버시 토글(`👁️`) ON 시 앱 내 모든 페이지·모달·외화 메모(`<FxNoteText />`)·비고/메모 원문(`<MemoText />`)·차트(가격대 분포 오버레이 포함)에서 금액 정보 100% 마스킹 확인
 - [x] Public 저장소(`wine-forest`)에 실제 개인 와인 데이터나 OAuth Client ID 하드코딩 없음 (`.gitignore` 차단 완료)
 - [x] `일회성 로컬 이관 스크립트` 실행 시 `wine_db.json`(초기 이관 완료, 3단계 산지, 소비일 결측 0건)과 `migration_review.md`가 정상 생성되고 웹앱 Zod Import 통과
