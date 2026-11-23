@@ -1,0 +1,71 @@
+/* JH Wine Forest — Semantic Design Tokens (Light / Dark) */
+
+:root,
+[data-theme='light'] {
+  --bg-canvas: #faf9f6;
+  --bg-surface: #ffffff;
+  --bg-elevated: #f2efe9;
+  --border-subtle: #e6e2d8;
+
+  --text-primary: #1a211d;
+  --text-secondary: #55615b;
+  --text-muted: #7f8b85;
+
+  --brand-forest: #1b4332;
+  --brand-forest-hover: #2d6a4f;
+  --brand-burgundy: #722f37;
+  --brand-gold: #b58d24;
+
+  /* Wine Color 5-type semantic badges (WCAG AA) */
+  --wine-r: #8b2635;
+  --wine-w: #f3eed4;
+  --wine-w-border: #d5cba2;
+  --wine-w-fg: #3b3520;
+  --wine-sp: #4e95b3;
+  --wine-sw: #c97a2b;
+  --wine-ro: #d16b86;
+
+  /* Status tokens */
+  --status-ok: #2d6a4f;
+  --status-warn: #c97a2b;
+  --status-danger: #b53844;
+  --status-neutral: #6b7670;
+
+  color-scheme: light;
+}
+
+[data-theme='dark'] {
+  --bg-canvas: #0d1411;
+  --bg-surface: #15201b;
+  --bg-elevated: #1e2e27;
+  --border-subtle: #273931;
+
+  --text-primary: #f2f6f3;
+  --text-secondary: #9fb0a7;
+  --text-muted: #6e8077;
+
+  --brand-forest: #40916c;
+  --brand-forest-hover: #52b788;
+  --brand-burgundy: #b55460;
+  --brand-gold: #d4af37;
+
+  /* Wine Color 5-type semantic badges (Dark adjusted for WCAG AA) */
+  --wine-r: #c94a63;
+  --wine-w: #efead0;
+  --wine-w-border: #c9c097;
+  --wine-w-fg: #262214;
+  --wine-sp: #6eb5d3;
+  --wine-sw: #e69242;
+  --wine-ro: #ea8da5;
+
+  --status-ok: #52b788;
+  --status-warn: #e69242;
+  --status-danger: #e05a67;
+  --status-neutral: #84968c;
+
+  color-scheme: dark;
+}
+
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
+}
