@@ -19,6 +19,7 @@ export interface StorageAdapter {
     photoFolderId: string;
   }>;
   findDbFile(): Promise<RemoteFileMeta | null>;
+  getFileModifiedTime(fileId: string): Promise<string | null>;
   loadDb(fileId: string): Promise<{ data: WineDatabase; modifiedTime: string }>;
   saveDb(
     fileId: string | null,

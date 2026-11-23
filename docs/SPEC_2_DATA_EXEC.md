@@ -112,6 +112,7 @@ export interface BackupSnapshot {
 export interface StorageAdapter {
   ensureWorkspace(): Promise<{ rootFolderId: string; backupFolderId: string; photoFolderId: string }>;
   findDbFile(): Promise<RemoteFileMeta | null>;
+  getFileModifiedTime(fileId: string): Promise<string | null>;
   loadDb(fileId: string): Promise<{ data: WineDatabase; modifiedTime: string }>;
   saveDb(
     fileId: string | null,
@@ -156,7 +157,7 @@ export interface StorageAdapter {
 
 ### 5.5 주 1회 자동 백업 & 안전한 복원 (유지비 0원)
 * **트리거 조건:** 저장 시 `data.metadata.lastBackupAt`이 `null`이거나 현재 시각과 차이가 **7일($7 \times 24$시간) 이상**이면 자동으로 백업을 실행합니다.
-* **단일 저장 동작:** 충돌 사전 검증 통과 후 `JH_Wine_Forest/backups/wine_db_backup_YYYYMMDD.json`을 먼저 업로드하고, 성공 시 `lastBackupAt`을 갱신한 데이터로 메인 `wine_db.json`을 **단 1회 저장**합니다(이중 쓰기 방지).
+* **단일 저장 동작:** `getFileModifiedTime(fileId)` 단건 메타 조회로 사전 충돌 검증을 통과한 뒤 `JH_Wine_Forest/backups/wine_db_backup_YYYYMMDD.json`을 먼저 업로드하고, 성공 시 `lastBackupAt`을 갱신한 데이터로 메인 `wine_db.json`을 **단 1회 저장**합니다(이중 쓰기 방지, `saveDb()` 직전 2차 충돌 검사로 백업 중 타 기기 변경도 방어).
 * **복원 전 대피 백업:** 과거 백업 스냅샷으로 복원하기 직전에도 현재 DB를 `backups/wine_db_pre_restore_YYYYMMDD_HHmmss.json`으로 자동 대피 백업합니다.
 * **보존 정책:** 백업 파일은 자동 삭제하지 않고 영구 보관합니다(1년 52개 ≈ 15~50MB, 무료 용량 범위).
 
@@ -286,7 +287,8 @@ wine-forest/
 │   ├── privacyMode.test.tsx        # 가격·외화·메모·차트 프라이버시 마스킹 검증
 │   ├── statsCalculator.test.ts     # 230218 통계, 3단계 산지, 평균가, 소비/선물 분리 검증
 │   ├── schemaValidation.test.ts    # Zod 스키마 및 FK 무결성 검증
-│   └── syncConflict.test.ts        # Mock StorageAdapter 기반 충돌 감지·주 1회 백업·안전 복원 검증
+│   ├── syncConflict.test.ts        # Mock StorageAdapter 기반 충돌 감지·단건 메타 조회·주 1회 백업·안전 복원 검증
+│   └── wineStore.test.ts           # 4중 키 병합·고아 마스터 정리·선반 삭제 안전성·소비/복원 스토어 변이 검증
 ├── docs/
 │   ├── SPEC_1_UI_ARCH.md           # 작업지시서 1부
 │   ├── SPEC_2_DATA_EXEC.md         # 작업지시서 2부
@@ -356,7 +358,7 @@ Antigravity(Gemini Neon)는 아래 **6개 마일스톤**을 순서대로 완료�
 
 ## 10. 최종 완료 기준 (Definition of Done — 검증 완료)
 
-- [x] `npm run test` 모든 단위 테스트(스키마, 230218 통계·3단계 산지, 충돌 감지, 주 1회 자동 백업, 프라이버시 마스킹) 100% 통과 (13/13)
+- [x] `npm run test` 모든 단위 테스트(스키마, 230218 통계·3단계 산지, 충돌 감지·주 1회 백업, 프라이버시 마스킹, 스토어 도메인 변이) 100% 통과 (5 suites / 18 tests)
 - [x] `npm run build` TypeScript/Vite 에러 및 경고 없이 완료, PWA 서비스워커(`dist/sw.js`) 정상 생성
 - [x] 모바일(`390×844`)과 데스크톱(`1440×900`) 양쪽에서 라이트/다크 모드 모두 대비·가독성 결함 없음 (화이트 연노랑 `#F3EED4`/`#EFEAD0` 다크 텍스트 대비 포함)
 - [x] 프라이버시 토글(`👁️`) ON 시 앱 내 모든 페이지·모달·외화 메모(`<FxNoteText />`)·비고/메모 원문(`<MemoText />`)·차트(가격대 분포 오버레이 포함)에서 금액 정보 100% 마스킹 확인

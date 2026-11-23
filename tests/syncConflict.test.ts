@@ -34,6 +34,7 @@ function createMockAdapter(initialDb: WineDatabase, initialModifiedTime: string)
       fileId: 'file-1',
       modifiedTime: remoteModifiedTime,
     })),
+    getFileModifiedTime: vi.fn(async (): Promise<string | null> => remoteModifiedTime),
     loadDb: vi.fn(async () => ({
       data: structuredClone(remoteDb),
       modifiedTime: remoteModifiedTime,
@@ -124,6 +125,8 @@ describe('SyncEngine — Optimistic Locking, Weekly Backup & Safe Restore', () =
       }),
     ).rejects.toBeInstanceOf(ConflictError);
 
+    expect(adapter.getFileModifiedTime).toHaveBeenCalledWith('file-1');
+    expect(adapter.findDbFile).not.toHaveBeenCalled();
     expect(adapter.createBackup).not.toHaveBeenCalled();
   });
 

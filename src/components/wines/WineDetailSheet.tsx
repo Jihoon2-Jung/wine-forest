@@ -1,4 +1,4 @@
-import { ChevronDown, ChevronUp, Pencil, Plus } from 'lucide-react';
+import { ChevronDown, ChevronUp, Pencil, Plus, RotateCcw } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import { WINE_COLORS, type WineColor, type WineMaster } from '@/types/schema';
 import {
@@ -9,7 +9,7 @@ import {
 } from '@/services/domain/wineHelpers';
 import { useWineStore } from '@/store/useWineStore';
 import { BottomSheet } from '@/components/common/BottomSheet';
-import { PriceText } from '@/components/common/PriceText';
+import { MemoText, PriceText } from '@/components/common/PriceText';
 import { WineColorBadge } from '@/components/common/WineColorBadge';
 import { WineThumbnail } from '@/components/common/WineThumbnail';
 import { MoveBottlePicker } from '@/components/cellar/MoveBottlePicker';
@@ -25,6 +25,7 @@ export function WineDetailSheet({ wineId, onClose }: WineDetailSheetProps) {
   const db = useWineStore((s) => s.db);
   const openQuickAdd = useWineStore((s) => s.openQuickAdd);
   const updateWineMaster = useWineStore((s) => s.updateWineMaster);
+  const restoreBottleToStock = useWineStore((s) => s.restoreBottleToStock);
 
   const [consumeBottleId, setConsumeBottleId] = useState<string | null>(null);
   const [moveBottleId, setMoveBottleId] = useState<string | null>(null);
@@ -312,29 +313,62 @@ export function WineDetailSheet({ wineId, onClose }: WineDetailSheetProps) {
               </button>
               {showPastHistory && (
                 <div className="space-y-2 border-t border-subtle px-3.5 py-3">
-                  {pastRecords.map(({ bottle, tasting }) => (
-                    <div
-                      key={bottle.id}
-                      className="flex items-center justify-between gap-2 rounded-lg bg-surface px-3 py-2 text-xs border border-subtle/60"
-                    >
-                      <div className="min-w-0">
-                        <span
-                          className={`mr-1.5 inline-block rounded px-1.5 py-0.5 text-[10px] font-bold text-white ${
-                            bottle.status === 'GIFTED' ? 'bg-gold' : 'bg-burgundy'
-                          }`}
-                        >
-                          {bottle.status === 'GIFTED' ? '선물' : '소비'}
-                        </span>
-                        <span className="tabular-nums font-medium text-primary">
-                          {tasting?.eventDate ?? '날짜 미상'}
-                        </span>
-                        {tasting?.occasion && (
-                          <span className="ml-1.5 text-secondary">· {tasting.occasion}</span>
+                  {pastRecords.map(({ bottle, tasting }) => {
+                    const validPrevLocId =
+                      bottle.locationId && locationMap.has(bottle.locationId) ? bottle.locationId : null;
+                    const restoreTargetName = validPrevLocId
+                      ? locationMap.get(validPrevLocId) ?? '미지정'
+                      : '미지정';
+                    return (
+                      <div
+                        key={bottle.id}
+                        className="space-y-1.5 rounded-lg border border-subtle/60 bg-surface px-3 py-2 text-xs"
+                      >
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="min-w-0">
+                            <span
+                              className={`mr-1.5 inline-block rounded px-1.5 py-0.5 text-[10px] font-bold text-white ${
+                                bottle.status === 'GIFTED' ? 'bg-gold' : 'bg-burgundy'
+                              }`}
+                            >
+                              {bottle.status === 'GIFTED' ? '선물' : '소비'}
+                            </span>
+                            <span className="tabular-nums font-medium text-primary">
+                              {tasting?.eventDate ?? '날짜 미상'}
+                            </span>
+                            {tasting?.occasion && (
+                              <span className="ml-1.5 text-secondary">· {tasting.occasion}</span>
+                            )}
+                          </div>
+                          <div className="flex shrink-0 items-center gap-2">
+                            <PriceText value={bottle.purchasePrice} className="font-semibold text-secondary" />
+                            <button
+                              type="button"
+                              onClick={() => {
+                                if (
+                                  window.confirm(
+                                    `이 병을 '${restoreTargetName}' 위치로 보유 복원할까요?\n(연결된 소비·선물 이력은 삭제됩니다.)`,
+                                  )
+                                ) {
+                                  void restoreBottleToStock(bottle.id, validPrevLocId);
+                                }
+                              }}
+                              className="inline-flex items-center gap-1 rounded-md border border-subtle bg-elevated px-2 py-0.5 text-[11px] font-semibold text-secondary hover:border-forest hover:text-forest"
+                              title="보유 상태로 복원"
+                            >
+                              <RotateCcw className="h-3 w-3" />
+                              <span>복원</span>
+                            </button>
+                          </div>
+                        </div>
+                        {tasting?.memo && (
+                          <div className="text-[11px] text-secondary">
+                            <MemoText text={tasting.memo} />
+                          </div>
                         )}
                       </div>
-                      <PriceText value={bottle.purchasePrice} className="shrink-0 font-semibold text-secondary" />
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
             </div>

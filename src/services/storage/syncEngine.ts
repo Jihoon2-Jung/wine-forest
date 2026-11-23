@@ -68,9 +68,9 @@ export class SyncEngine {
       //    원격 파일이 존재하고 강제 덮어쓰기가 아니라면 먼저 원격 modifiedTime으로 사전 충돌 검증
       //    (충돌 시 불필요한 백업을 만들지 않기 위함)
       if (needsBackup && params.fileId && expected !== null) {
-        const remoteMeta = await adapter.findDbFile();
-        if (remoteMeta && remoteMeta.modifiedTime !== expected) {
-          throw new ConflictError(params.fileId, expected, remoteMeta.modifiedTime);
+        const remoteModifiedTime = await adapter.getFileModifiedTime(params.fileId);
+        if (remoteModifiedTime && remoteModifiedTime !== expected) {
+          throw new ConflictError(params.fileId, expected, remoteModifiedTime);
         }
       }
 

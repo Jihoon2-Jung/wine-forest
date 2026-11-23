@@ -36,10 +36,10 @@
 | :--- | :--- |
 | **R2 (팝업 차단 방지)** | 토큰 만료 시 로컬에 안전 저장 후 상단 1클릭 재인증 버튼(동기 클릭 핸들러)에서 GIS `requestAccessToken()` 호출 (`src/components/layout/AppShell.tsx`, `src/services/auth/googleAuth.ts`) |
 | **R3 (오프라인 변경 보호)** | IndexedDB에 `hasUnsyncedChanges` 영속화, 미동기화 상태일 때 자동 Pull 덮어쓰기 차단 (`src/services/storage/localCache.ts`, `src/store/useWineStore.ts`) |
-| **R4 (자가 충돌 & 백업)** | `SyncEngine` Write Mutex 직렬화 + 주간 자동 백업 선행 업로드 후 `lastBackupAt` 포함 메인 1회 저장 (`src/services/storage/syncEngine.ts`) |
+| **R4 (자가 충돌 & 백업)** | `SyncEngine` Write Mutex 직렬화 + `StorageAdapter.getFileModifiedTime(fileId)` 단건 사전 충돌 검증 후 주간 자동 백업 선행 업로드, `lastBackupAt` 포함 메인 1회 저장 (`src/services/storage/syncEngine.ts`, `types.ts`) |
 | **R6 (마스터 병합 키)** | `(name, vintage, bottleSizeMl, color)` 4중 키로 동명 레드/화이트 오병합 차단 (`src/services/domain/wineHelpers.ts`, `일회성 로컬 이관 스크립트`) |
 | **M1~M3 (안전장치)** | 선반 삭제 시 `IN_STOCK`만 차단 + 과거 이력 댕글링 FK 정리, 프라이버시 모드 시 `fxNote`·`memo` 원문·가격대 분포 차트 전체 마스킹, 백업 복원 직전 `pre_restore` 대피 백업, 토큰 만료 시 백업 목록 재인증 안내 |
-| **M4~M5 (UX·정합성)** | `QuickAddModal` 오픈 중 `db` 갱신 시 폼 초기화 버그 방지(`useRef`), 마지막 병 삭제 시 0병 고아 `WineMaster` 자동 정리, 마스터 수정 시 4중 키 중복 확인 후 병합 |
+| **M4~M5 (UX·정합성)** | `QuickAddModal` 오픈 중 `db` 갱신 시 폼 초기화 버그 방지(`useRef`) + `250ml` 프리셋·용량 직접 입력, `WineDetailSheet` 과거 이력 `<MemoText />` 및 경량 `[↩️ 복원]`, 마지막 병 삭제 시 0병 고아 `WineMaster` 자동 정리, 마스터 수정 시 4중 키 중복 확인 후 병합 |
 | **T1 (누적 지출 기준)** | 초기 이관 전체 병을 포함해 `V1` 기준 유지 (`migration_review.md`에 보정 전 원본 0원 일치 + 개별 보정 차액 근거 병기) |
 | **T2 (모바일 성능)** | `HistoryPage` 최근 50건씩 점진적 표시 + `[더보기]` / `[전체 보기]` (`src/pages/HistoryPage.tsx`) |
 | **T3 (다중 가격 표기)** | 모바일 카드 `평균 ₩XX,XXX`, 데스크톱 카드 `평균 ₩XX,XXX` + `최저~최고` 범위 병기 (`src/components/wines/WineGroupCard.tsx`) |
@@ -55,4 +55,4 @@
 
 - **Milestone 1~4 (웹앱 풀스택 SPA/PWA):** 완료 (`src/` 전체 + `public/` 아이콘 + Tailwind/CSS 변수)
 - **Milestone 5 (엑셀 마이그레이션):** `일회성 로컬 이관 스크립트` 실행 → `wine_db.json` (초기 이관 완료 · 3단계 산지 · 미분류 0건 · 소비일 결측 0건 · 선반 24개) 및 `migration_review.md` 생성, Zod 통과
-- **Milestone 6 (CI/CD · 테스트 · 실배포):** `.github/workflows/deploy.yml`(`build`/`deploy` 2개 Job 분리, `actions/upload-pages-artifact@v4`, `actions/deploy-pages@v4`), `README.md`, `npm run typecheck` (0 errors), `npm run test` (4 suites / 13 tests pass), `npm run build` (0 warnings, PWA `dist/sw.js` 생성), GitHub Pages 프로덕션 배포 및 PC·스마트폰 Google Drive 동기화 검증 완료
+- **Milestone 6 (CI/CD · 테스트 · 실배포):** `.github/workflows/deploy.yml`(`build`/`deploy` 2개 Job 분리, `actions/upload-pages-artifact@v4`, `actions/deploy-pages@v4`), `README.md`, `npm run typecheck` (0 errors), `npm run test` (5 suites / 18 tests pass), `npm run build` (0 warnings, PWA `dist/sw.js` 생성), GitHub Pages 프로덕션 배포 및 PC·스마트폰 Google Drive 동기화 검증 완료

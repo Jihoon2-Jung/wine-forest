@@ -41,6 +41,11 @@ export class LocalOnlyAdapter implements StorageAdapter {
     };
   }
 
+  async getFileModifiedTime(_fileId: string): Promise<string | null> {
+    const meta = await this.findDbFile();
+    return meta?.modifiedTime ?? null;
+  }
+
   async loadDb(_fileId: string): Promise<{ data: WineDatabase; modifiedTime: string }> {
     const cached = await loadCachedState();
     if (!cached?.data) {

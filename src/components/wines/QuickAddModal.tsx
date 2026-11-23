@@ -613,13 +613,13 @@ export function QuickAddModal() {
             <div className="space-y-3 border-t border-subtle px-3.5 py-3">
               <div className="space-y-1.5">
                 <span className="block text-xs font-semibold text-secondary">용량 (ml)</span>
-                <div className="flex flex-wrap gap-1.5">
-                  {[375, 500, 750, 1500].map((ml) => (
+                <div className="flex flex-wrap items-center gap-1.5">
+                  {[250, 375, 500, 750, 1500].map((ml) => (
                     <button
                       key={ml}
                       type="button"
                       onClick={() => setBottleSizeMl(ml)}
-                      className={`rounded-lg border px-3 py-1.5 text-xs font-bold tabular-nums ${
+                      className={`rounded-lg border px-2.5 py-1.5 text-xs font-bold tabular-nums ${
                         bottleSizeMl === ml
                           ? 'border-forest bg-forest text-white'
                           : 'border-subtle bg-surface text-secondary'
@@ -628,6 +628,29 @@ export function QuickAddModal() {
                       {ml}ml
                     </button>
                   ))}
+                  <div className="flex items-center gap-1">
+                    <input
+                      type="number"
+                      min={50}
+                      max={18000}
+                      step={5}
+                      aria-label="용량 직접 입력 (ml)"
+                      value={bottleSizeMl || ''}
+                      onChange={(e) => {
+                        const parsed = Number(e.target.value);
+                        if (!Number.isNaN(parsed)) {
+                          setBottleSizeMl(Math.max(0, Math.round(parsed)));
+                        }
+                      }}
+                      onBlur={() => {
+                        if (!bottleSizeMl || bottleSizeMl < 50) {
+                          setBottleSizeMl(750);
+                        }
+                      }}
+                      className="w-20 rounded-lg border border-subtle bg-surface px-2 py-1.5 text-xs font-bold tabular-nums text-primary focus:border-forest focus:outline-none"
+                    />
+                    <span className="text-[11px] font-semibold text-secondary">ml</span>
+                  </div>
                 </div>
               </div>
 
