@@ -18,6 +18,7 @@ export function ConflictModal() {
     <BottomSheet
       open={Boolean(conflict)}
       onClose={() => undefined}
+      dismissible={false}
       title="데이터 동기화 충돌이 감지되었습니다"
       subtitle="다른 기기에서 wine_db.json이 먼저 수정되었습니다."
     >

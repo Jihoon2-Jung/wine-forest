@@ -1,3 +1,4 @@
+import { Capacitor } from '@capacitor/core';
 import { create } from 'zustand';
 import type {
   BottleInstance,
@@ -10,10 +11,15 @@ import type {
 import { parseApprovedLabelsBundle, parseWineDatabase } from '@/types/validation';
 import {
   clearAccessToken,
-  hasGoogleClientId,
+  ensureAccessToken,
+  getAuthUserEmail,
+  isGoogleAuthConfigured,
+  isNativeAuth,
   isTokenValid,
   requestAccessToken,
+  restoreAuthSession,
 } from '@/services/auth/googleAuth';
+import { exportJsonWithNativeShare, syncStatusBar } from '@/services/native/nativeBridge';
 import {
   buildWineLabelGroupKey,
   findMatchingWineMaster,
@@ -164,9 +170,16 @@ export function applyThemeToDom(theme: ThemeMode): void {
       metaTheme.setAttribute('content', theme === 'dark' ? '#0D1411' : '#1B4332');
     }
   }
+  void syncStatusBar(theme);
 }
 
 function detectDeviceLabel(): string {
+  if (Capacitor.isNativePlatform()) {
+    const platform = Capacitor.getPlatform();
+    if (platform === 'ios') return 'iOS App';
+    if (platform === 'android') return 'Android App';
+    return 'Mobile App';
+  }
   if (typeof navigator === 'undefined') return 'Web';
   const ua = navigator.userAgent || '';
   const os = /iPhone/i.test(ua)
@@ -219,6 +232,7 @@ interface WineStoreState {
   isHydrated: boolean;
   storageMode: StorageMode;
   googleConnected: boolean;
+  authUserEmail: string | null;
   authRevision: number;
   fileId: string | null;
   lastSyncedModifiedTime: string | null;
@@ -353,7 +367,7 @@ export const useWineStore = create<WineStoreState>((set, get) => {
     const adapter = getAdapter(mode);
     for (const fileId of uniqueCandidates) {
       if (!referenced.has(fileId)) {
-        if (mode === 'local_test' || isTokenValid()) {
+        if (mode === 'local_test' || isTokenValid() || (isNativeAuth() && get().googleConnected)) {
           void adapter.deletePhoto(fileId).catch(() => undefined);
         }
         void evictPhotoFromCache(fileId);
@@ -381,9 +395,9 @@ export const useWineStore = create<WineStoreState>((set, get) => {
     });
     await persistLocalCache({ data: updatedDb, hasUnsyncedChanges: true });
 
-    // 2. Google Drive 모드인데 토큰이 만료/없음 -> 비동기 팝업 호출 금지(R2 보강)!
-    //    안전하게 로컬 보관 후 1클릭 재인증 배지/토스트로 유도
-    if (state.storageMode === 'google_drive' && !isTokenValid()) {
+    // 2. Google Drive 모드(웹 GIS)인데 토큰이 만료/없음 -> 비동기 팝업 호출 금지(R2 보강)!
+    //    안전하게 로컬 보관 후 1클릭 재인증 배지/토스트로 유도 (네이티브 앱은 saveWithPolicy 내부에서 무음 갱신 시도)
+    if (state.storageMode === 'google_drive' && !isNativeAuth() && !isTokenValid()) {
       set({ syncStatus: 'auth_required' });
       get().showToast(
         '변경사항이 기기에 안전 저장되었습니다. 상단 [재인증]을 눌러 Google Drive에 동기화하세요.',
@@ -451,8 +465,9 @@ export const useWineStore = create<WineStoreState>((set, get) => {
   return {
     db: null,
     isHydrated: false,
-    storageMode: hasGoogleClientId() ? 'google_drive' : 'local_test',
+    storageMode: isGoogleAuthConfigured() ? 'google_drive' : 'local_test',
     googleConnected: false,
+    authUserEmail: null,
     authRevision: 0,
     fileId: null,
     lastSyncedModifiedTime: null,
@@ -480,7 +495,8 @@ export const useWineStore = create<WineStoreState>((set, get) => {
       if (!cached || !cached.data) {
         set({
           isHydrated: true,
-          storageMode: cached?.storageMode ?? (hasGoogleClientId() ? 'google_drive' : 'local_test'),
+          storageMode:
+            cached?.storageMode ?? (isGoogleAuthConfigured() ? 'google_drive' : 'local_test'),
         });
         return;
       }
@@ -493,14 +509,19 @@ export const useWineStore = create<WineStoreState>((set, get) => {
       }
 
       const mode = cached.storageMode;
+      const nativeMode = mode === 'google_drive' && isNativeAuth();
       const initialSyncStatus: SyncStatus =
         mode === 'local_test'
           ? 'synced'
-          : cached.hasUnsyncedChanges
-            ? 'auth_required'
-            : isTokenValid()
-              ? 'synced'
-              : 'offline_cache';
+          : nativeMode
+            ? cached.hasUnsyncedChanges
+              ? 'syncing'
+              : 'offline_cache'
+            : cached.hasUnsyncedChanges
+              ? 'auth_required'
+              : isTokenValid()
+                ? 'synced'
+                : 'offline_cache';
 
       set({
         db: validDb,
@@ -511,6 +532,29 @@ export const useWineStore = create<WineStoreState>((set, get) => {
         syncStatus: initialSyncStatus,
         isHydrated: true,
       });
+
+      if (nativeMode && validDb) {
+        void (async () => {
+          const session = await restoreAuthSession();
+          if (session) {
+            set({
+              googleConnected: true,
+              authUserEmail: session.email ?? getAuthUserEmail(),
+              authRevision: get().authRevision + 1,
+              syncError: null,
+            });
+            const latest = get();
+            if (latest.hasUnsyncedChanges && latest.db) {
+              await commitMutation(latest.db, '대기 중이던 변경사항을 Google Drive에 동기화했습니다.');
+            } else if (latest.db) {
+              await get().syncNow();
+            }
+          } else if (cached.hasUnsyncedChanges) {
+            set({ syncStatus: 'auth_required' });
+          }
+        })();
+        return;
+      }
 
       // R3 보강: 미동기화 변경사항(hasUnsyncedChanges)이 있으면 절대 자동 Pull 덮어쓰기 금지!
       if (mode === 'google_drive' && validDb && isTokenValid() && !cached.hasUnsyncedChanges) {
@@ -531,6 +575,7 @@ export const useWineStore = create<WineStoreState>((set, get) => {
       set({
         storageMode: 'google_drive',
         googleConnected: true,
+        authUserEmail: getAuthUserEmail(),
         authRevision: get().authRevision + 1,
         syncStatus: 'syncing',
         syncError: null,
@@ -609,14 +654,17 @@ export const useWineStore = create<WineStoreState>((set, get) => {
         return;
       }
 
-      if (!hasGoogleClientId()) {
+      if (!isGoogleAuthConfigured()) {
         get().showToast('VITE_GOOGLE_CLIENT_ID가 설정되어 있지 않아 Google Drive 모드로 전환할 수 없습니다.', 'error');
         return;
       }
 
       try {
         await requestAccessToken();
-        set({ authRevision: get().authRevision + 1 });
+        set({
+          authRevision: get().authRevision + 1,
+          authUserEmail: getAuthUserEmail(),
+        });
         googleDriveAdapter.resetWorkspaceCache();
         const currentDb = get().db;
         const found = await googleDriveAdapter.findDbFile();
@@ -749,7 +797,7 @@ export const useWineStore = create<WineStoreState>((set, get) => {
     importJsonDatabase: async (raw) => {
       const validated = parseWineDatabase(raw);
       const state = get();
-      if (state.storageMode === 'google_drive' && !isTokenValid()) {
+      if (state.storageMode === 'google_drive' && !isNativeAuth() && !isTokenValid()) {
         // 드라이브 연결 안 된 상태면 로컬 캐시에만 먼저 반영 후 동기화 안내
         set({
           db: validated,
@@ -764,7 +812,7 @@ export const useWineStore = create<WineStoreState>((set, get) => {
     },
 
     disconnectAndResetLocal: async () => {
-      clearAccessToken();
+      await clearAccessToken();
       googleDriveAdapter.resetWorkspaceCache();
       await clearCachedState();
       await clearAllPhotoCaches();
@@ -774,6 +822,7 @@ export const useWineStore = create<WineStoreState>((set, get) => {
         lastSyncedModifiedTime: null,
         hasUnsyncedChanges: false,
         googleConnected: false,
+        authUserEmail: null,
         syncStatus: 'offline_cache',
         conflict: null,
         backups: [],
@@ -794,6 +843,7 @@ export const useWineStore = create<WineStoreState>((set, get) => {
         await requestAccessToken();
         set({
           googleConnected: true,
+          authUserEmail: getAuthUserEmail(),
           authRevision: get().authRevision + 1,
           syncError: null,
         });
@@ -818,7 +868,7 @@ export const useWineStore = create<WineStoreState>((set, get) => {
         get().showToast('로컬 테스트 모드는 모든 변경이 즉시 저장됩니다.', 'info');
         return;
       }
-      if (!isTokenValid()) {
+      if (!isNativeAuth() && !isTokenValid()) {
         set({ syncStatus: 'auth_required' });
         get().showToast('토큰이 만료되었습니다. [구글 재인증]을 눌러 주세요.', 'warning');
         return;
@@ -942,7 +992,7 @@ export const useWineStore = create<WineStoreState>((set, get) => {
 
     fetchBackups: async () => {
       const state = get();
-      if (state.storageMode === 'google_drive' && !isTokenValid()) {
+      if (state.storageMode === 'google_drive' && !isNativeAuth() && !isTokenValid()) {
         return;
       }
       set({ isLoadingBackups: true });
@@ -950,16 +1000,21 @@ export const useWineStore = create<WineStoreState>((set, get) => {
         const list = await getAdapter(state.storageMode).listBackups();
         set({ backups: list, isLoadingBackups: false });
       } catch (err) {
-        set({ isLoadingBackups: false });
-        const msg = err instanceof Error ? err.message : '백업 목록 조회 실패';
-        get().showToast(msg, 'error');
+        if (err instanceof AuthRequiredError) {
+          set({ isLoadingBackups: false, syncStatus: 'auth_required', syncError: err.message });
+          get().showToast('백업 조회를 위해 [구글 재인증]을 진행해 주세요.', 'warning');
+        } else {
+          set({ isLoadingBackups: false });
+          const msg = err instanceof Error ? err.message : '백업 목록 조회 실패';
+          get().showToast(msg, 'error');
+        }
       }
     },
 
     createManualBackup: async () => {
       const state = get();
       if (!state.db) return;
-      if (state.storageMode === 'google_drive' && !isTokenValid()) {
+      if (state.storageMode === 'google_drive' && !isNativeAuth() && !isTokenValid()) {
         get().showToast('수동 백업을 위해 먼저 구글 재인증을 진행해 주세요.', 'warning');
         return;
       }
@@ -976,14 +1031,19 @@ export const useWineStore = create<WineStoreState>((set, get) => {
         await commitMutation(updatedDb, `수동 백업 생성 완료 (${snapshot.name})`);
         await get().fetchBackups();
       } catch (err) {
-        const msg = err instanceof Error ? err.message : '수동 백업 실패';
-        get().showToast(msg, 'error');
+        if (err instanceof AuthRequiredError) {
+          set({ syncStatus: 'auth_required', syncError: err.message });
+          get().showToast('수동 백업을 위해 먼저 구글 재인증을 진행해 주세요.', 'warning');
+        } else {
+          const msg = err instanceof Error ? err.message : '수동 백업 실패';
+          get().showToast(msg, 'error');
+        }
       }
     },
 
     restoreFromBackup: async (backupFileId) => {
       const state = get();
-      if (state.storageMode === 'google_drive' && !isTokenValid()) {
+      if (state.storageMode === 'google_drive' && !isNativeAuth() && !isTokenValid()) {
         get().showToast('복원을 위해 먼저 구글 재인증을 진행해 주세요.', 'warning');
         return;
       }
@@ -1011,25 +1071,34 @@ export const useWineStore = create<WineStoreState>((set, get) => {
         await get().fetchBackups();
         get().showToast('현재 DB를 대피 백업한 뒤 선택한 스냅샷으로 복원했습니다.', 'success');
       } catch (err) {
-        const msg = err instanceof Error ? err.message : '백업 복원 실패';
-        set({ syncStatus: 'error', syncError: msg });
-        get().showToast(msg, 'error');
+        if (err instanceof AuthRequiredError) {
+          set({ syncStatus: 'auth_required', syncError: err.message });
+          get().showToast('복원을 위해 먼저 구글 재인증을 진행해 주세요.', 'warning');
+        } else {
+          const msg = err instanceof Error ? err.message : '백업 복원 실패';
+          set({ syncStatus: 'error', syncError: msg });
+          get().showToast(msg, 'error');
+        }
       }
     },
 
     exportLocalJson: () => {
       const db = get().db;
       if (!db) return;
-      const blob = new Blob([JSON.stringify(db, null, 2)], { type: 'application/json' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `wine_db_export_${formatBackupDateTimeStamp()}.json`;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      URL.revokeObjectURL(url);
-      get().showToast('JSON 백업 파일을 다운로드했습니다.', 'success');
+      const fileName = `wine_db_export_${formatBackupDateTimeStamp()}.json`;
+      const jsonText = JSON.stringify(db, null, 2);
+      void exportJsonWithNativeShare(fileName, jsonText)
+        .then((res) => {
+          if (res === 'downloaded') {
+            get().showToast('JSON 백업 파일을 다운로드했습니다.', 'success');
+          } else if (res === 'shared') {
+            get().showToast('JSON 백업 공유 시트를 열었습니다.', 'success');
+          }
+        })
+        .catch((err) => {
+          const msg = err instanceof Error ? err.message : 'JSON 내보내기에 실패했습니다.';
+          get().showToast(msg, 'error');
+        });
     },
 
     // --- Domain Mutations ---
@@ -1513,7 +1582,7 @@ export const useWineStore = create<WineStoreState>((set, get) => {
       const state = get();
       const db = state.db;
       if (!db) return;
-      if (state.storageMode === 'google_drive' && !isTokenValid()) {
+      if (state.storageMode === 'google_drive' && !isNativeAuth() && !isTokenValid()) {
         set({ syncStatus: 'auth_required' });
         get().showToast('사진을 업로드하려면 상단 [구글 재인증]을 먼저 눌러 주세요.', 'warning');
         return;
@@ -1562,8 +1631,13 @@ export const useWineStore = create<WineStoreState>((set, get) => {
           }
         }
       } catch (err) {
-        const msg = err instanceof Error ? err.message : '라벨 사진 업로드에 실패했습니다.';
-        get().showToast(msg, 'error');
+        if (err instanceof AuthRequiredError) {
+          set({ syncStatus: 'auth_required', syncError: err.message });
+          get().showToast('사진을 업로드하려면 상단 [구글 재인증]을 먼저 눌러 주세요.', 'warning');
+        } else {
+          const msg = err instanceof Error ? err.message : '라벨 사진 업로드에 실패했습니다.';
+          get().showToast(msg, 'error');
+        }
       }
     },
 
@@ -1592,7 +1666,11 @@ export const useWineStore = create<WineStoreState>((set, get) => {
       const adapter = getAdapter(state.storageMode);
       for (const oldFileId of removedFileIds) {
         if (!stillReferenced.has(oldFileId)) {
-          if (state.storageMode === 'local_test' || isTokenValid()) {
+          if (
+            state.storageMode === 'local_test' ||
+            isTokenValid() ||
+            (isNativeAuth() && state.googleConnected)
+          ) {
             void adapter.deletePhoto(oldFileId).catch(() => undefined);
           }
           void evictPhotoFromCache(oldFileId);
@@ -1602,7 +1680,7 @@ export const useWineStore = create<WineStoreState>((set, get) => {
 
     uploadTastingPhoto: async (file) => {
       const state = get();
-      if (state.storageMode === 'google_drive' && !isTokenValid()) {
+      if (state.storageMode === 'google_drive' && !isNativeAuth() && !isTokenValid()) {
         set({ syncStatus: 'auth_required' });
         get().showToast('사진을 업로드하려면 상단 [구글 재인증]을 먼저 눌러 주세요.', 'warning');
         return null;
@@ -1615,8 +1693,13 @@ export const useWineStore = create<WineStoreState>((set, get) => {
         await registerUploadedPhotoBlob(fileId, processed.blob);
         return fileId;
       } catch (err) {
-        const msg = err instanceof Error ? err.message : '시음 사진 업로드에 실패했습니다.';
-        get().showToast(msg, 'error');
+        if (err instanceof AuthRequiredError) {
+          set({ syncStatus: 'auth_required', syncError: err.message });
+          get().showToast('사진을 업로드하려면 상단 [구글 재인증]을 먼저 눌러 주세요.', 'warning');
+        } else {
+          const msg = err instanceof Error ? err.message : '시음 사진 업로드에 실패했습니다.';
+          get().showToast(msg, 'error');
+        }
         return null;
       }
     },
@@ -1624,7 +1707,11 @@ export const useWineStore = create<WineStoreState>((set, get) => {
     deleteTastingPhotoFile: async (fileId) => {
       const state = get();
       const adapter = getAdapter(state.storageMode);
-      if (state.storageMode === 'local_test' || isTokenValid()) {
+      if (
+        state.storageMode === 'local_test' ||
+        isTokenValid() ||
+        (isNativeAuth() && state.googleConnected)
+      ) {
         void adapter.deletePhoto(fileId).catch(() => undefined);
       }
       void evictPhotoFromCache(fileId);
@@ -1637,13 +1724,29 @@ export const useWineStore = create<WineStoreState>((set, get) => {
       if (!db) return { applied: 0, skipped: 0, failed: 0 };
 
       const bundle = parseApprovedLabelsBundle(raw);
-      if (state.storageMode === 'google_drive' && !isTokenValid()) {
-        set({ syncStatus: 'auth_required' });
-        get().showToast(
-          '라벨을 Google Drive에 일괄 업로드하려면 먼저 상단 [구글 재인증]을 눌러 주세요.',
-          'warning',
-        );
-        return { applied: 0, skipped: 0, failed: bundle.items.length };
+      if (state.storageMode === 'google_drive') {
+        if (isNativeAuth()) {
+          try {
+            await ensureAccessToken();
+          } catch (err) {
+            set({
+              syncStatus: 'auth_required',
+              syncError: err instanceof Error ? err.message : undefined,
+            });
+            get().showToast(
+              '라벨을 Google Drive에 일괄 업로드하려면 먼저 상단 [구글 재인증]을 눌러 주세요.',
+              'warning',
+            );
+            return { applied: 0, skipped: 0, failed: bundle.items.length };
+          }
+        } else if (!isTokenValid()) {
+          set({ syncStatus: 'auth_required' });
+          get().showToast(
+            '라벨을 Google Drive에 일괄 업로드하려면 먼저 상단 [구글 재인증]을 눌러 주세요.',
+            'warning',
+          );
+          return { applied: 0, skipped: 0, failed: bundle.items.length };
+        }
       }
 
       const wineMap = new Map(db.wines.map((w) => [w.id, w]));

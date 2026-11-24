@@ -1,6 +1,6 @@
 import type { WineDatabase } from '@/types/schema';
 import { parseWineDatabase } from '@/types/validation';
-import { getAccessToken } from '@/services/auth/googleAuth';
+import { ensureAccessToken, isNativeAuth } from '@/services/auth/googleAuth';
 import {
   AuthRequiredError,
   ConflictError,
@@ -35,21 +35,25 @@ export class GoogleDriveAdapter implements StorageAdapter {
     photoFolderId: string;
   } | null = null;
 
-  private requireToken(): string {
-    const token = getAccessToken();
-    if (!token) {
-      throw new AuthRequiredError();
-    }
-    return token;
-  }
-
-  private async fetchDrive(url: string, init: RequestInit = {}): Promise<Response> {
-    const token = this.requireToken();
+  private async fetchDrive(
+    url: string,
+    init: RequestInit = {},
+    retried = false,
+    options?: { allowNotFound?: boolean },
+  ): Promise<Response> {
+    const token = await ensureAccessToken();
     const headers = new Headers(init.headers);
     headers.set('Authorization', `Bearer ${token}`);
     const response = await fetch(url, { ...init, headers });
     if (response.status === 401) {
+      if (isNativeAuth() && !retried) {
+        await ensureAccessToken({ forceRefresh: true });
+        return this.fetchDrive(url, init, true, options);
+      }
       throw new AuthRequiredError('구글 인증이 만료되었습니다. 1클릭 재인증을 진행해 주세요.');
+    }
+    if (options?.allowNotFound && response.status === 404) {
+      return response;
     }
     if (!response.ok) {
       const detail = await response.text().catch(() => '');
@@ -364,17 +368,11 @@ export class GoogleDriveAdapter implements StorageAdapter {
   }
 
   async deletePhoto(fileId: string): Promise<void> {
-    const token = this.requireToken();
-    const res = await fetch(`${DRIVE_API_BASE}/files/${fileId}`, {
-      method: 'DELETE',
-      headers: { Authorization: `Bearer ${token}` },
-    });
-    if (res.status === 401) {
-      throw new AuthRequiredError('구글 인증이 만료되었습니다. 1클릭 재인증을 진행해 주세요.');
-    }
-    if (!res.ok && res.status !== 404) {
-      const detail = await res.text().catch(() => '');
-      throw new Error(`Google Drive 사진 삭제 오류 (${res.status}): ${detail || res.statusText}`);
-    }
+    await this.fetchDrive(
+      `${DRIVE_API_BASE}/files/${fileId}`,
+      { method: 'DELETE' },
+      false,
+      { allowNotFound: true },
+    );
   }
 }

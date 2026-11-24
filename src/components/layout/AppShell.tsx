@@ -1,5 +1,8 @@
-import type { ReactNode } from 'react';
+import { useEffect, useRef, type ReactNode } from 'react';
 import { KeyRound } from 'lucide-react';
+import { useLocation, useNavigate } from 'react-router-dom';
+import { isNativeAuth } from '@/services/auth/googleAuth';
+import { initAndroidBackButton } from '@/services/native/nativeBridge';
 import { useWineStore } from '@/store/useWineStore';
 import { ConflictModal } from '@/components/common/ConflictModal';
 import { ToastBar } from '@/components/common/ToastBar';
@@ -14,9 +17,37 @@ export function AppShell({ children }: { children: ReactNode }) {
   const hasUnsyncedChanges = useWineStore((s) => s.hasUnsyncedChanges);
   const storageMode = useWineStore((s) => s.storageMode);
   const reauthenticateAndSync = useWineStore((s) => s.reauthenticateAndSync);
+  const showToast = useWineStore((s) => s.showToast);
+
+  const location = useLocation();
+  const navigate = useNavigate();
+  const pathnameRef = useRef(location.pathname);
+  pathnameRef.current = location.pathname;
+
+  useEffect(() => {
+    let active = true;
+    let cleanup: (() => void) | undefined;
+    void initAndroidBackButton({
+      getPathname: () => pathnameRef.current,
+      navigateBack: () => navigate(-1),
+      navigateHome: () => navigate('/', { replace: true }),
+      showExitHint: () => showToast('한 번 더 누르면 앱이 종료됩니다.', 'info'),
+    }).then((fn) => {
+      if (active) {
+        cleanup = fn;
+      } else {
+        fn();
+      }
+    });
+    return () => {
+      active = false;
+      cleanup?.();
+    };
+  }, [navigate, showToast]);
 
   const showReauthBanner =
     storageMode === 'google_drive' && (syncStatus === 'auth_required' || hasUnsyncedChanges);
+  const nativeAuth = isNativeAuth();
 
   return (
     <div className="min-h-dvh bg-canvas text-primary">
@@ -31,7 +62,9 @@ export function AppShell({ children }: { children: ReactNode }) {
               <span className="font-medium text-primary">
                 {hasUnsyncedChanges
                   ? '기기에 임시 저장된 변경사항이 있습니다. 1클릭 재인증으로 Google Drive에 동기화하세요.'
-                  : 'Google 인증 세션(1시간)이 만료되었습니다. 조회는 계속 가능하며 쓰기 전 재인증이 필요합니다.'}
+                  : nativeAuth
+                    ? 'Google 인증 연결이 만료되었습니다. 버튼 1탭으로 다시 연결해 동기화하세요.'
+                    : 'Google 인증 세션(1시간)이 만료되었습니다. 조회는 계속 가능하며 쓰기 전 재인증이 필요합니다.'}
               </span>
               <button
                 type="button"

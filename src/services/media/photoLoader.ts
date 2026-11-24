@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { isTokenValid } from '@/services/auth/googleAuth';
+import { isNativeAuth, isTokenValid } from '@/services/auth/googleAuth';
 import { GoogleDriveAdapter } from '@/services/storage/googleDriveAdapter';
 import {
   clearAllCachedPhotos,
@@ -81,7 +81,10 @@ export async function resolvePhotoUrl(
         return url;
       }
 
-      if (storageMode === 'google_drive' && isTokenValid()) {
+      if (
+        storageMode === 'google_drive' &&
+        (isTokenValid() || (isNativeAuth() && useWineStore.getState().googleConnected))
+      ) {
         const remoteBlob = await photoDriveClient.downloadPhoto(fileId);
         await putCachedPhoto(fileId, remoteBlob);
         const url = URL.createObjectURL(remoteBlob);

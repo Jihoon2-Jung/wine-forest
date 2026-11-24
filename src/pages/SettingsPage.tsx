@@ -19,13 +19,15 @@ import {
 import { useEffect, useRef, useState } from 'react';
 import { parseApprovedLabelsBundle, type ApprovedLabelsBundle } from '@/types/validation';
 import { buildWineLabelGroupKey } from '@/services/domain/wineHelpers';
-import { hasGoogleClientId, isTokenValid } from '@/services/auth/googleAuth';
+import { isGoogleAuthConfigured, isNativeAuth, isTokenValid } from '@/services/auth/googleAuth';
 import { useWineStore } from '@/store/useWineStore';
 import { BottomSheet } from '@/components/common/BottomSheet';
 
 export function SettingsPage() {
   const db = useWineStore((s) => s.db);
   const storageMode = useWineStore((s) => s.storageMode);
+  const googleConnected = useWineStore((s) => s.googleConnected);
+  const authUserEmail = useWineStore((s) => s.authUserEmail);
   const lastSyncedModifiedTime = useWineStore((s) => s.lastSyncedModifiedTime);
   const hasUnsyncedChanges = useWineStore((s) => s.hasUnsyncedChanges);
   const backups = useWineStore((s) => s.backups);
@@ -69,8 +71,10 @@ export function SettingsPage() {
 
   if (!db) return null;
 
-  const clientIdReady = hasGoogleClientId();
+  const clientIdReady = isGoogleAuthConfigured();
+  const nativeMode = isNativeAuth();
   const tokenActive = isTokenValid();
+  const nativeAutoRefreshReady = nativeMode && (tokenActive || googleConnected);
   const missingDrinkingWindowCount = db.wines.filter(
     (w) => w.drinkingWindowStart == null && w.drinkingWindowEnd == null,
   ).length;
@@ -184,6 +188,9 @@ export function SettingsPage() {
               <h3 className="text-sm font-bold text-primary">
                 {storageMode === 'google_drive' ? 'Google Drive 동기화 모드' : '로컬 테스트 모드'}
               </h3>
+              {storageMode === 'google_drive' && authUserEmail && (
+                <p className="text-[11px] font-medium text-forest">{authUserEmail}</p>
+              )}
               <p className="text-xs text-secondary tabular-nums">
                 마지막 저장:{' '}
                 {lastSyncedModifiedTime
@@ -199,16 +206,18 @@ export function SettingsPage() {
             className={`rounded-full px-2.5 py-1 text-[11px] font-bold ${
               storageMode === 'local_test'
                 ? 'bg-gold/15 text-gold'
-                : tokenActive
+                : tokenActive || nativeAutoRefreshReady
                   ? 'bg-[var(--status-ok)]/15 text-[var(--status-ok)]'
                   : 'bg-elevated text-secondary'
             }`}
           >
             {storageMode === 'local_test'
               ? 'IndexedDB 로컬'
-              : tokenActive
-                ? '토큰 유효'
-                : '재인증 필요'}
+              : nativeAutoRefreshReady
+                ? '모바일 자동 갱신 활성'
+                : tokenActive
+                  ? '토큰 유효'
+                  : '재인증 필요'}
           </span>
         </div>
 
@@ -291,7 +300,7 @@ export function SettingsPage() {
 
         {isLoadingBackups ? (
           <div className="py-6 text-center text-xs text-secondary">백업 목록을 불러오는 중...</div>
-        ) : storageMode === 'google_drive' && !tokenActive ? (
+        ) : storageMode === 'google_drive' && !tokenActive && !nativeAutoRefreshReady ? (
           <div className="flex flex-col items-center gap-2.5 rounded-xl border border-[var(--status-warn)]/35 bg-[var(--status-warn)]/10 px-4 py-5 text-center">
             <p className="text-xs font-semibold text-primary">
               구글 재인증 후 드라이브 백업 목록을 불러올 수 있습니다.

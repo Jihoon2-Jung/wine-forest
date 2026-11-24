@@ -9,7 +9,7 @@ import {
   Sun,
 } from 'lucide-react';
 import { useRef, useState } from 'react';
-import { hasGoogleClientId } from '@/services/auth/googleAuth';
+import { isGoogleAuthConfigured } from '@/services/auth/googleAuth';
 import { useWineStore } from '@/store/useWineStore';
 import { ToastBar } from '@/components/common/ToastBar';
 
@@ -26,7 +26,7 @@ export function OnboardingView() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
   const [importTargetMode, setImportTargetMode] = useState<'google_drive' | 'local_test'>('google_drive');
-  const clientIdReady = hasGoogleClientId();
+  const clientIdReady = isGoogleAuthConfigured();
 
   const handleGoogleStart = async () => {
     setBusy(true);

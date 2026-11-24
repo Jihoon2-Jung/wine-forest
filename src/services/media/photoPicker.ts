@@ -1,3 +1,4 @@
+import { Capacitor } from '@capacitor/core';
 import type { PhotoPreset } from './imageProcessor';
 
 export type PhotoPickSource = 'prompt' | 'camera' | 'photos';
@@ -9,45 +10,41 @@ export interface PickImageOptions {
    * 'photos': 앨범 선택
    */
   source?: PhotoPickSource;
-  /** 용도 힌트 ('label' | 'tasting') — 추후 네이티브 카메라 1차 리사이즈 기준에 활용 */
+  /** 용도 힌트 ('label' | 'tasting') — 네이티브 카메라 1차 리사이즈 기준에 활용 */
   preset?: PhotoPreset;
 }
 
 /**
  * 단일 이미지 선택 진입점 (Web / Capacitor 공용 어댑터 포인트)
- *
- * [NEXT AGENT HANDOFF — Mobile M1~M3 (@capacitor/camera 연동 지점)]
- * 추후 Capacitor 모바일 전환 시 UI 컴포넌트(WineDetailSheet, QuickConsumeModal, HistoryCard)는
- * 전혀 수정하지 말고, 이 함수 상단에 아래 네이티브 분기만 추가하십시오:
- *
- * ```ts
- * if (Capacitor.isNativePlatform()) {
- *   const { Camera, CameraResultType, CameraSource } = await import('@capacitor/camera');
- *   const capSource =
- *     options.source === 'camera'
- *       ? CameraSource.Camera
- *       : options.source === 'photos'
- *         ? CameraSource.Photos
- *         : CameraSource.Prompt;
- *   const photo = await Camera.getPhoto({
- *     resultType: CameraResultType.Uri,
- *     source: capSource,
- *     quality: 80,
- *     width: options.preset === 'label' ? 1000 : 1600,
- *     correctOrientation: true,
- *   });
- *   if (!photo.webPath) return null;
- *   const res = await fetch(photo.webPath);
- *   return res.blob();
- * }
- * ```
- *
- * 반환된 Blob(웹에서는 File)은 useWineStore의 uploadWineLabelPhoto / uploadTastingPhoto로
- * 그대로 전달되어 imageProcessor.ts(500px/1024px WebP 압축) → StorageAdapter.uploadPhoto()를 탑니다.
  */
-export function pickImageFile(options: PickImageOptions = {}): Promise<Blob | null> {
+export async function pickImageFile(options: PickImageOptions = {}): Promise<Blob | null> {
+  if (Capacitor.isNativePlatform()) {
+    try {
+      const { Camera, CameraResultType, CameraSource } = await import('@capacitor/camera');
+      const capSource =
+        options.source === 'camera'
+          ? CameraSource.Camera
+          : options.source === 'photos'
+            ? CameraSource.Photos
+            : CameraSource.Prompt;
+      const photo = await Camera.getPhoto({
+        resultType: CameraResultType.Uri,
+        source: capSource,
+        quality: 80,
+        width: options.preset === 'label' ? 1000 : 1600,
+        correctOrientation: true,
+      });
+      if (!photo.webPath) return null;
+      const res = await fetch(photo.webPath);
+      if (!res.ok) return null;
+      return await res.blob();
+    } catch {
+      return null;
+    }
+  }
+
   if (typeof document === 'undefined') {
-    return Promise.resolve(null);
+    return null;
   }
 
   return new Promise<Blob | null>((resolve) => {
@@ -79,13 +76,13 @@ export function pickImageFile(options: PickImageOptions = {}): Promise<Blob | nu
       cleanup(null);
     };
 
-    // 일부 구형 브라우저(Safari 등)는 취소 시 cancel 이벤트를 발생시키지 않으므로 focus 복귀 후 정리
+    // 일부 구형 브라우저(iOS Safari iCloud 변환 포함)는 cancel 이벤트가 지연/미발생하므로 focus 복귀 후 1초 대기
     const handleWindowFocus = () => {
       window.setTimeout(() => {
         if (!settled && (!input.files || input.files.length === 0)) {
           cleanup(null);
         }
-      }, 400);
+      }, 1000);
     };
 
     input.addEventListener('change', handleChange, { once: true });

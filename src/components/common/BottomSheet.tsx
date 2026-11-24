@@ -1,5 +1,6 @@
-import { useEffect, type ReactNode } from 'react';
+import { useEffect, useId, useRef, type ReactNode } from 'react';
 import { X } from 'lucide-react';
+import { registerModalCloser } from '@/services/native/nativeBridge';
 
 interface BottomSheetProps {
   open: boolean;
@@ -7,6 +8,7 @@ interface BottomSheetProps {
   title?: string;
   subtitle?: string;
   maxWidthClass?: string;
+  dismissible?: boolean;
   children: ReactNode;
   footer?: ReactNode;
 }
@@ -17,13 +19,25 @@ export function BottomSheet({
   title,
   subtitle,
   maxWidthClass = 'md:max-w-xl',
+  dismissible = true,
   children,
   footer,
 }: BottomSheetProps) {
+  const sheetId = useId();
+  const latestOnCloseRef = useRef(onClose);
+  latestOnCloseRef.current = onClose;
+
+  useEffect(() => {
+    if (!open || !dismissible) return;
+    return registerModalCloser(`sheet-${sheetId}`, () => latestOnCloseRef.current());
+  }, [open, dismissible, sheetId]);
+
   useEffect(() => {
     if (!open) return;
     const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
+      if (e.key === 'Escape' && dismissible) {
+        latestOnCloseRef.current();
+      }
     };
     document.addEventListener('keydown', onKeyDown);
     const prevOverflow = document.body.style.overflow;
@@ -32,7 +46,7 @@ export function BottomSheet({
       document.removeEventListener('keydown', onKeyDown);
       document.body.style.overflow = prevOverflow;
     };
-  }, [open, onClose]);
+  }, [open, dismissible]);
 
   if (!open) return null;
 
@@ -45,7 +59,7 @@ export function BottomSheet({
       {/* Backdrop */}
       <div
         className="fixed inset-0 bg-black/50 backdrop-blur-[2px] transition-opacity"
-        onClick={onClose}
+        onClick={dismissible ? () => latestOnCloseRef.current() : undefined}
       />
 
       {/* Sheet / Dialog Panel */}
@@ -68,19 +82,29 @@ export function BottomSheet({
                 <p className="mt-0.5 truncate text-xs text-secondary">{subtitle}</p>
               )}
             </div>
-            <button
-              type="button"
-              onClick={onClose}
-              className="shrink-0 rounded-full p-1.5 text-secondary hover:bg-elevated hover:text-primary transition-colors"
-              aria-label="닫기"
-            >
-              <X className="h-5 w-5" />
-            </button>
+            {dismissible && (
+              <button
+                type="button"
+                onClick={onClose}
+                className="shrink-0 rounded-full p-1.5 text-secondary hover:bg-elevated hover:text-primary transition-colors"
+                aria-label="닫기"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            )}
           </div>
         )}
 
         {/* Body */}
-        <div className="flex-1 overflow-y-auto px-5 py-4">{children}</div>
+        <div
+          className={
+            footer
+              ? 'flex-1 overflow-y-auto px-5 py-4'
+              : 'flex-1 overflow-y-auto px-5 pt-4 pb-[calc(1rem+env(safe-area-inset-bottom,0px))]'
+          }
+        >
+          {children}
+        </div>
 
         {/* Footer */}
         {footer && (
