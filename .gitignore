@@ -35,6 +35,9 @@ venv/
 *.xls
 wine_db*.json
 migration_review*.md
+approved_labels*.json
+label_review*.html
+label_review*/
 *.local.json
 .env
 .env.local
