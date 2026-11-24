@@ -223,6 +223,8 @@ def match_local_candidates(
 
     scored: List[Tuple[int, Path]] = []
     for stem_key, path in local_index:
+        if len(stem_key) < 3:
+            continue
         score = 0
         if wine_key in stem_key or stem_key in wine_key:
             score += 10
@@ -399,6 +401,12 @@ HTML_TEMPLATE = """<!doctype html>
     }
     .foot { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 6px; }
     .tip { max-width: 1280px; margin: 12px auto 0; padding: 10px 20px; font-size: 12px; color: var(--muted); }
+    .storage-warn {
+      display: none; max-width: 1280px; margin: 10px auto 0; padding: 10px 20px;
+      font-size: 12px; font-weight: 700; color: var(--danger);
+      background: rgba(180,35,24,.08); border: 1px solid rgba(180,35,24,.28); border-radius: 10px;
+    }
+    .storage-warn.visible { display: block; }
   </style>
 </head>
 <body>
@@ -421,6 +429,8 @@ HTML_TEMPLATE = """<!doctype html>
     ③ 완료 후 우측 상단 <strong>[승인 라벨 번들 내보내기]</strong> → 웹앱 <strong>설정(⚙️) → 승인된 라벨 일괄 적용</strong>에 업로드하면 Google Drive에 자동 저장됩니다.
   </div>
 
+  <div class="storage-warn" id="storageWarning" role="alert"></div>
+
   <div class="toolbar">
     <input type="search" id="searchInput" placeholder="와인명, 빈티지, 산지 필터..." />
     <span class="sub" id="exportProgress"></span>
@@ -431,19 +441,129 @@ HTML_TEMPLATE = """<!doctype html>
   <script id="review-data" type="application/json">__PAYLOAD_JSON__</script>
   <script>
     const STORAGE_KEY = 'jh-wine-forest-label-review-v1';
+    const IDB_NAME = 'jh-wine-forest-label-review-db';
+    const IDB_STORE = 'state';
+    const IDB_KEY = 'selections';
     const items = JSON.parse(document.getElementById('review-data').textContent);
     let selections = {};
-    try {
-      selections = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}');
-    } catch { selections = {}; }
 
     let activeWineId = null;
     let onlyPending = false;
     let searchQuery = '';
 
-    function saveSelections() {
-      try { localStorage.setItem(STORAGE_KEY, JSON.stringify(selections)); } catch {}
+    function escapeHtml(val) {
+      return String(val ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+    }
+
+    function isSafeImageSrc(src) {
+      if (typeof src !== 'string') return false;
+      const trimmed = src.trim();
+      return /^https?:\\/\\//i.test(trimmed) || /^data:image\\/[a-zA-Z0-9.+-]+;base64,/i.test(trimmed);
+    }
+
+    function showStorageWarning(msg) {
+      const el = document.getElementById('storageWarning');
+      if (!el) return;
+      if (msg) {
+        el.textContent = msg;
+        el.classList.add('visible');
+      } else {
+        el.textContent = '';
+        el.classList.remove('visible');
+      }
+    }
+
+    function openReviewDb() {
+      return new Promise((resolve, reject) => {
+        if (typeof indexedDB === 'undefined') {
+          reject(new Error('IndexedDB를 사용할 수 없습니다.'));
+          return;
+        }
+        const req = indexedDB.open(IDB_NAME, 1);
+        req.onupgradeneeded = () => {
+          const db = req.result;
+          if (!db.objectStoreNames.contains(IDB_STORE)) {
+            db.createObjectStore(IDB_STORE);
+          }
+        };
+        req.onsuccess = () => resolve(req.result);
+        req.onerror = () => reject(req.error || new Error('IndexedDB 열기 실패'));
+      });
+    }
+
+    async function loadSelectionsFromStorage() {
+      try {
+        const db = await openReviewDb();
+        const saved = await new Promise((resolve, reject) => {
+          const tx = db.transaction(IDB_STORE, 'readonly');
+          const req = tx.objectStore(IDB_STORE).get(IDB_KEY);
+          req.onsuccess = () => resolve(req.result);
+          req.onerror = () => reject(req.error || new Error('IndexedDB 읽기 실패'));
+        });
+        if (saved && typeof saved === 'object') {
+          return saved;
+        }
+      } catch {
+        // IndexedDB 미지원/차단 환경은 localStorage 폴백
+      }
+
+      try {
+        const raw = localStorage.getItem(STORAGE_KEY);
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          if (parsed && typeof parsed === 'object') {
+            // 기존 localStorage 데이터를 IndexedDB로 자동 마이그레이션
+            try {
+              const db = await openReviewDb();
+              await new Promise((resolve, reject) => {
+                const tx = db.transaction(IDB_STORE, 'readwrite');
+                tx.objectStore(IDB_STORE).put(parsed, IDB_KEY);
+                tx.oncomplete = () => resolve();
+                tx.onerror = () => reject(tx.error || new Error('마이그레이션 저장 실패'));
+              });
+              localStorage.removeItem(STORAGE_KEY);
+            } catch {
+              // ignore migration failure
+            }
+            return parsed;
+          }
+        }
+      } catch {
+        // ignore parse errors
+      }
+      return {};
+    }
+
+    async function saveSelections() {
       updateHeader();
+      try {
+        const db = await openReviewDb();
+        await new Promise((resolve, reject) => {
+          const tx = db.transaction(IDB_STORE, 'readwrite');
+          tx.objectStore(IDB_STORE).put(selections, IDB_KEY);
+          tx.oncomplete = () => resolve();
+          tx.onerror = () => reject(tx.error || new Error('IndexedDB 저장 실패'));
+        });
+        showStorageWarning('');
+        return;
+      } catch {
+        // IndexedDB 실패 시 localStorage 폴백 시도
+      }
+
+      try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(selections));
+        showStorageWarning('');
+      } catch (err) {
+        const detail = err && err.message ? err.message : '브라우저 저장 용량 초과';
+        showStorageWarning(
+          `⚠️ 자동 저장에 실패했습니다 (${detail}). 새로고침하면 최근 작업이 유실될 수 있으니 지금 [승인 라벨 번들 내보내기]로 중간 저장해 주세요.`
+        );
+      }
     }
 
     function updateHeader() {
@@ -495,22 +615,29 @@ HTML_TEMPLATE = """<!doctype html>
       return blobToCompressedWebPDataUrl(blob);
     }
 
-    async function setWineSelectionFromBlob(wineId, blob) {
+    async function setWineSelectionFromBlob(wineId, blob, source = 'direct', sourceTitle = '') {
       const dataUrl = await blobToCompressedWebPDataUrl(blob);
-      selections[wineId] = { dataUrl, source: 'direct' };
-      saveSelections();
+      selections[wineId] = { dataUrl, source, sourceTitle, compressed: true };
+      await saveSelections();
       render();
     }
 
-    function setWineSelectionFromUrl(wineId, url, source) {
+    async function setWineSelectionFromDataUrl(wineId, rawDataUrl, source, sourceTitle = '') {
+      const dataUrl = await urlToCompressedDataUrl(rawDataUrl);
+      selections[wineId] = { dataUrl, source, sourceTitle, compressed: true };
+      await saveSelections();
+      render();
+    }
+
+    async function setWineSelectionFromUrl(wineId, url, source) {
       selections[wineId] = { url, source };
-      saveSelections();
+      await saveSelections();
       render();
     }
 
-    function clearWineSelection(wineId) {
+    async function clearWineSelection(wineId) {
       delete selections[wineId];
-      saveSelections();
+      await saveSelections();
       render();
     }
 
@@ -568,46 +695,78 @@ HTML_TEMPLATE = """<!doctype html>
         card.innerHTML = `
           <div class="card-head">
             <div>
-              <div class="wine-name">${w.name}</div>
-              <div class="meta">${w.color} · ${origin} · 보유 ${w.inStockCount}병 · ${vintageLabel}</div>
+              <div class="wine-name">${escapeHtml(w.name)}</div>
+              <div class="meta">${escapeHtml(w.color)} · ${escapeHtml(origin)} · 보유 ${Number(w.inStockCount) || 0}병 · ${escapeHtml(vintageLabel)}</div>
             </div>
             <span class="badge ${sel ? 'ok' : ''}">${sel ? '✅ 승인됨' : '대기'}</span>
           </div>
           <div class="candidates"></div>
           <div class="dropzone">
-            <div class="preview-box">${previewSrc ? `<img src="${previewSrc}" alt="선택된 라벨" />` : '미선택'}</div>
+            <div class="preview-box"></div>
             <div style="flex:1; display:flex; flex-direction:column; gap:6px;">
               <div>카드 클릭 후 <strong>Cmd+V</strong> 붙여넣기 또는 이미지 드래그&amp;드롭</div>
               <div class="url-row">
-                <input type="url" placeholder="또는 이미지 URL 붙여넣기 후 Enter" value="${sel?.url || ''}" />
+                <input type="url" placeholder="또는 이미지 URL 붙여넣기 후 Enter" />
                 <button type="button" class="btn-file">파일</button>
               </div>
             </div>
           </div>
           <div class="foot">
-            <a class="btn-link" href="${googleImgUrl}" target="_blank" rel="noopener noreferrer">🔍 구글 이미지 검색</a>
+            <a class="btn-link" href="${escapeHtml(googleImgUrl)}" target="_blank" rel="noopener noreferrer">🔍 구글 이미지 검색</a>
             ${sel ? '<button type="button" class="danger btn-clear">승인 취소</button>' : '<span class="sub">후보 선택 또는 붙여넣기</span>'}
           </div>
         `;
 
-        // 후보 썸네일 렌더
+        const previewBox = card.querySelector('.preview-box');
+        if (previewSrc && isSafeImageSrc(previewSrc)) {
+          const previewImg = document.createElement('img');
+          previewImg.src = previewSrc;
+          previewImg.alt = '선택된 라벨';
+          previewBox.appendChild(previewImg);
+        } else {
+          previewBox.textContent = '미선택';
+        }
+
+        // 후보 썸네일 렌더 (DOM API로 XSS 방지)
         const candWrap = card.querySelector('.candidates');
         if (w.candidates && w.candidates.length > 0) {
           for (const c of w.candidates) {
             const btn = document.createElement('button');
             btn.type = 'button';
-            btn.className = `cand${sel && (sel.url === c.url || sel.dataUrl === c.url) ? ' selected' : ''}`;
-            btn.title = `${c.source}: ${c.title || ''}`;
-            btn.innerHTML = `<img src="${c.url}" loading="lazy" alt="후보" /><span class="cand-tag">${c.source}</span>`;
-            btn.addEventListener('click', (ev) => {
+            const isSelected = Boolean(
+              sel &&
+              (
+                (sel.url && sel.url === c.url) ||
+                (sel.dataUrl && sel.dataUrl === c.url) ||
+                (sel.source === c.source && sel.sourceTitle && c.title && sel.sourceTitle === c.title)
+              )
+            );
+            btn.className = `cand${isSelected ? ' selected' : ''}`;
+            btn.title = `${c.source || ''}: ${c.title || ''}`;
+
+            const img = document.createElement('img');
+            if (isSafeImageSrc(c.url)) {
+              img.src = c.url;
+            }
+            img.loading = 'lazy';
+            img.alt = '후보';
+            const tag = document.createElement('span');
+            tag.className = 'cand-tag';
+            tag.textContent = String(c.source || '');
+            btn.appendChild(img);
+            btn.appendChild(tag);
+
+            btn.addEventListener('click', async (ev) => {
               ev.stopPropagation();
               activeWineId = key;
-              if (c.url.startsWith('data:')) {
-                selections[key] = { dataUrl: c.url, source: c.source };
-                saveSelections();
-                render();
-              } else {
-                setWineSelectionFromUrl(key, c.url, c.source);
+              if (typeof c.url === 'string' && c.url.startsWith('data:')) {
+                try {
+                  await setWineSelectionFromDataUrl(key, c.url, c.source || 'LocalFolder', c.title || '');
+                } catch {
+                  alert('로컬 이미지를 500px WebP로 압축하는 중 오류가 발생했습니다.');
+                }
+              } else if (isSafeImageSrc(c.url)) {
+                await setWineSelectionFromUrl(key, c.url, c.source || 'remote');
               }
             });
             candWrap.appendChild(btn);
@@ -616,17 +775,18 @@ HTML_TEMPLATE = """<!doctype html>
           candWrap.style.display = 'none';
         }
 
-        // URL 입력
+        // URL 입력 (DOM 프로퍼티로 안전하게 바인딩)
         const urlInput = card.querySelector('input[type="url"]');
+        urlInput.value = sel?.url || '';
         urlInput.addEventListener('keydown', (ev) => {
           if (ev.key === 'Enter' && urlInput.value.trim()) {
             ev.preventDefault();
-            setWineSelectionFromUrl(key, urlInput.value.trim(), 'url');
+            void setWineSelectionFromUrl(key, urlInput.value.trim(), 'url');
           }
         });
         urlInput.addEventListener('change', () => {
           if (urlInput.value.trim()) {
-            setWineSelectionFromUrl(key, urlInput.value.trim(), 'url');
+            void setWineSelectionFromUrl(key, urlInput.value.trim(), 'url');
           }
         });
 
@@ -660,7 +820,7 @@ HTML_TEMPLATE = """<!doctype html>
         if (clearBtn) {
           clearBtn.addEventListener('click', (ev) => {
             ev.stopPropagation();
-            clearWineSelection(key);
+            void clearWineSelection(key);
           });
         }
 
@@ -678,10 +838,10 @@ HTML_TEMPLATE = """<!doctype html>
       render();
     });
 
-    document.getElementById('btnClearSaved').addEventListener('click', () => {
+    document.getElementById('btnClearSaved').addEventListener('click', async () => {
       if (confirm('저장된 라벨 승인 선택 내역을 모두 초기화할까요?')) {
         selections = {};
-        saveSelections();
+        await saveSelections();
         render();
       }
     });
@@ -704,9 +864,9 @@ HTML_TEMPLATE = """<!doctype html>
         const sel = selections[w.groupKey || w.wineId];
         prog.textContent = `500px WebP 압축 중... (${i + 1}/${approvedEntries.length})`;
         try {
-          const dataUrl = sel.dataUrl
+          const dataUrl = sel.dataUrl && sel.compressed
             ? sel.dataUrl
-            : await urlToCompressedDataUrl(sel.url);
+            : await urlToCompressedDataUrl(sel.dataUrl || sel.url);
           const mimeMatch = dataUrl.match(/^data:(image\\/[a-zA-Z0-9.+-]+);base64,/);
           exportedItems.push({
             wineId: w.wineId,
@@ -750,7 +910,10 @@ HTML_TEMPLATE = """<!doctype html>
       }
     });
 
-    render();
+    (async () => {
+      selections = await loadSelectionsFromStorage();
+      render();
+    })();
   </script>
 </body>
 </html>

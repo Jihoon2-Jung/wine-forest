@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { BottleInstance, TastingRecord, WineMaster } from '@/types/schema';
 import { parseWineDatabase } from '@/types/validation';
@@ -10,6 +10,9 @@ import {
 import { estimateDrinkingWindow } from '@/services/domain/drinkingWindowEstimator';
 import { computeScaledDimensions, dataUrlToBlob } from '@/services/media/imageProcessor';
 import { pickImageFile } from '@/services/media/photoPicker';
+import { usePhotoUrl } from '@/services/media/photoLoader';
+import { GoogleDriveAdapter } from '@/services/storage/googleDriveAdapter';
+import * as googleAuth from '@/services/auth/googleAuth';
 import { createDemoDatabase } from '@/services/storage/defaultTemplates';
 
 vi.mock('@/services/storage/localCache', () => ({
@@ -367,6 +370,256 @@ describe('Phase 2-3A — Image Scaling & Unified Photo Picker', () => {
     } finally {
       URL.createObjectURL = origCreate;
       URL.revokeObjectURL = origRevoke;
+    }
+  });
+});
+
+describe('Code Review Regression Fixes — Estimator, HistoryCard Edit, & Reauth Photo Reload', () => {
+  it('classifies Burgundy village communes separately from Grand Cru, supports Korean spellings, and handles RO/SP', () => {
+    // 1) 부르고뉴 빌라쥬 와인이 그랑크뤼(+7~+22)로 오분류되지 않고 1er/주요 마을(+5~+16, 2018 shift -1/-1 → 2022~2033)로 분류되어야 함
+    const gevreyVillage = estimateDrinkingWindow({
+      name: 'Domaine Test Gevrey-Chambertin',
+      country: '프랑스',
+      region: '부르고뉴',
+      subRegion: '쥬브레 샹베르탱',
+      color: 'R',
+      vintage: '2018',
+    });
+    expect(gevreyVillage).toEqual(expect.objectContaining({ start: 2022, end: 2033 }));
+    expect(gevreyVillage?.basis).toContain('1er/주요 마을');
+
+    const vosneVillage = estimateDrinkingWindow({
+      name: 'Domaine Test Vosne-Romanée',
+      country: '프랑스',
+      region: '부르고뉴',
+      subRegion: '본 로마네',
+      color: 'R',
+      vintage: '2018',
+    });
+    expect(vosneVillage).toEqual(expect.objectContaining({ start: 2022, end: 2033 }));
+    expect(vosneVillage?.basis).toContain('1er/주요 마을');
+
+    const chambolleVillage = estimateDrinkingWindow({
+      name: 'Domaine Test Chambolle-Musigny',
+      country: '프랑스',
+      region: '부르고뉴',
+      subRegion: '샹볼 뮈지니',
+      color: 'R',
+      vintage: '2018',
+    });
+    expect(chambolleVillage).toEqual(expect.objectContaining({ start: 2022, end: 2033 }));
+    expect(chambolleVillage?.basis).toContain('1er/주요 마을');
+
+    // 화이트 주요 마을(+4~+12, 2018 shift -1/-1 → 2021~2029)
+    const chassagneVillage = estimateDrinkingWindow({
+      name: 'Domaine Test Chassagne-Montrachet',
+      country: '프랑스',
+      region: '부르고뉴',
+      subRegion: '샤샤뉴 몽라쉐',
+      color: 'W',
+      vintage: '2018',
+    });
+    expect(chassagneVillage).toEqual(expect.objectContaining({ start: 2021, end: 2029 }));
+    expect(chassagneVillage?.basis).toContain('1er/주요 마을');
+
+    // 2) 실제 그랑크뤼(+7~+22 / +5~+16, 2018 shift -1/-1) 및 local_migration_script 한글 표기('꼬르똥', '샤또뇌프 뒤 빠쁘') 정상 매칭
+    const charmesGc = estimateDrinkingWindow({
+      name: 'Domaine Test Charmes-Chambertin',
+      country: '프랑스',
+      region: '부르고뉴',
+      subRegion: '쥬브레 샹베르탱',
+      color: 'R',
+      vintage: '2018',
+    });
+    expect(charmesGc).toEqual(expect.objectContaining({ start: 2024, end: 2039 }));
+    expect(charmesGc?.basis).toContain('그랑크뤼');
+
+    const cortonCharlemagne = estimateDrinkingWindow({
+      name: 'Domaine Test 꼬르똥 샤를마뉴',
+      country: '프랑스',
+      region: '부르고뉴',
+      subRegion: '꼬르똥',
+      color: 'W',
+      vintage: '2018',
+    });
+    expect(cortonCharlemagne).toEqual(expect.objectContaining({ start: 2022, end: 2033 }));
+    expect(cortonCharlemagne?.basis).toContain('그랑크뤼');
+
+    const cdp = estimateDrinkingWindow({
+      name: 'Chateau Test',
+      country: '프랑스',
+      region: '론',
+      subRegion: '샤또뇌프 뒤 빠쁘',
+      color: 'R',
+      vintage: '2018',
+    });
+    expect(cdp).toEqual(expect.objectContaining({ start: 2023, end: 2034 }));
+    expect(cdp?.basis).toContain('CDP');
+
+    // 3) 로제(RO)와 비-상파뉴 프랑스 스파클링(크레망 SP)이 레드/빈티지 상파뉴로 오분류되지 않아야 함
+    const bdxRose = estimateDrinkingWindow({
+      name: 'Chateau Test Rose',
+      country: '프랑스',
+      region: '보르도',
+      color: 'RO',
+      vintage: '2022',
+    });
+    expect(bdxRose).toEqual(expect.objectContaining({ start: 2023, end: 2025 }));
+
+    const cremant = estimateDrinkingWindow({
+      name: 'Domaine Test Cremant de Bourgogne',
+      country: '프랑스',
+      region: '부르고뉴',
+      color: 'SP',
+      vintage: '2020',
+    });
+    expect(cremant).toEqual(expect.objectContaining({ start: 2022, end: 2026 }));
+
+    const vintageChamp = estimateDrinkingWindow({
+      name: 'Dom Perignon',
+      country: '프랑스',
+      region: '상파뉴',
+      color: 'SP',
+      vintage: '2015',
+    });
+    expect(vintageChamp).toEqual(expect.objectContaining({ start: 2022, end: 2035 }));
+  });
+
+  it('defers existing photo deletion until save and resets draft on cancel in HistoryCard', async () => {
+    const deletePhotoMock = vi.fn(async () => undefined);
+    const updateTastingMock = vi.fn(async () => undefined);
+
+    const origDelete = useWineStore.getState().deleteTastingPhotoFile;
+    const origUpdate = useWineStore.getState().updateTastingRecord;
+    useWineStore.setState({
+      isPrivacyMode: false,
+      deleteTastingPhotoFile: deletePhotoMock,
+      updateTastingRecord: updateTastingMock,
+    });
+
+    const wine: WineMaster = {
+      id: 'w-edit-1',
+      name: 'Test Wine',
+      country: '프랑스',
+      region: '부르고뉴',
+      color: 'R',
+      vintage: '2020',
+      bottleSizeMl: 750,
+      createdAt: '2026-01-01T00:00:00Z',
+      updatedAt: '2026-01-01T00:00:00Z',
+    };
+    const bottle: BottleInstance = {
+      id: 'b-edit-1',
+      wineId: 'w-edit-1',
+      status: 'CONSUMED',
+      locationId: null,
+      purchaseDate: '2025-01-01',
+      purchaseSource: '와인샵',
+      purchasePrice: 100000,
+      includeInTrackingSince: true,
+      createdAt: '2025-01-01T00:00:00Z',
+      updatedAt: '2026-01-01T00:00:00Z',
+    };
+    const tasting: TastingRecord = {
+      id: 't-edit-1',
+      bottleId: 'b-edit-1',
+      type: 'CONSUMED',
+      eventDate: '2026-11-24',
+      occasion: '원본 모임',
+      tastingNote: '원본 노트',
+      photoFileIds: ['https://example.com/saved-photo.webp'],
+      createdAt: '2026-11-24T00:00:00Z',
+    };
+
+    try {
+      render(<HistoryCard tasting={tasting} bottle={bottle} wine={wine} locations={[]} />);
+
+      // 1) 편집 열기 → 텍스트 수정 + 기존 사진 X 클릭 → [취소]
+      fireEvent.click(screen.getByRole('button', { name: '이력 수정' }));
+      const occasionInput = screen.getByPlaceholderText('모임 / 대상');
+      fireEvent.change(occasionInput, { target: { value: '임시 수정값' } });
+      fireEvent.click(screen.getByRole('button', { name: '사진 제거' }));
+
+      // 저장 전 삭제 호출되면 안 됨
+      expect(deletePhotoMock).not.toHaveBeenCalled();
+
+      fireEvent.click(screen.getByRole('button', { name: '취소' }));
+      expect(deletePhotoMock).not.toHaveBeenCalled();
+      expect(updateTastingMock).not.toHaveBeenCalled();
+
+      // 2) 편집 재진입 시 직전 취소한 임시값이 리셋되고 기존 사진이 유지되어야 함
+      fireEvent.click(screen.getByRole('button', { name: '이력 수정' }));
+      expect((screen.getByPlaceholderText('모임 / 대상') as HTMLInputElement).value).toBe('원본 모임');
+      expect(screen.getByRole('button', { name: '사진 제거' })).toBeInTheDocument();
+
+      // 3) 기존 사진 삭제 후 [저장] → 그제서야 deleteTastingPhotoFile 호출
+      fireEvent.click(screen.getByRole('button', { name: '사진 제거' }));
+      fireEvent.click(screen.getByRole('button', { name: '저장' }));
+
+      await waitFor(() => {
+        expect(updateTastingMock).toHaveBeenCalledWith(
+          't-edit-1',
+          expect.objectContaining({ photoFileIds: [] }),
+        );
+        expect(deletePhotoMock).toHaveBeenCalledWith('https://example.com/saved-photo.webp');
+      });
+    } finally {
+      useWineStore.setState({
+        deleteTastingPhotoFile: origDelete,
+        updateTastingRecord: origUpdate,
+      });
+    }
+  });
+
+  it('reloads uncached Drive photos via usePhotoUrl when authRevision increments even if googleConnected stays true', async () => {
+    const origCreate = URL.createObjectURL;
+    const origRevoke = URL.revokeObjectURL;
+    URL.createObjectURL = vi.fn(() => 'blob:reloaded-drive-photo');
+    URL.revokeObjectURL = vi.fn();
+
+    let tokenValid = false;
+    const isTokenSpy = vi.spyOn(googleAuth, 'isTokenValid').mockImplementation(() => tokenValid);
+    const downloadSpy = vi
+      .spyOn(GoogleDriveAdapter.prototype, 'downloadPhoto')
+      .mockResolvedValue(new Blob(['img-bytes'], { type: 'image/webp' }));
+
+    function PhotoProbe({ fileId }: { fileId: string }) {
+      const url = usePhotoUrl(fileId);
+      return <div data-testid="photo-url">{url ?? 'EMPTY'}</div>;
+    }
+
+    try {
+      // 1시간 만료 상황: googleConnected는 true 유지, 토큰은 무효
+      useWineStore.setState({
+        storageMode: 'google_drive',
+        googleConnected: true,
+        authRevision: 1,
+      });
+
+      render(<PhotoProbe fileId="drive_uncached_photo_1" />);
+      await waitFor(() => {
+        expect(screen.getByTestId('photo-url').textContent).toBe('EMPTY');
+      });
+      expect(downloadSpy).not.toHaveBeenCalled();
+
+      // 재인증 완료: googleConnected는 여전히 true이지만 authRevision 증가
+      tokenValid = true;
+      act(() => {
+        useWineStore.setState({ authRevision: 2 });
+      });
+
+      await waitFor(() => {
+        expect(screen.getByTestId('photo-url').textContent).toBe('blob:reloaded-drive-photo');
+      });
+      expect(downloadSpy).toHaveBeenCalledWith('drive_uncached_photo_1');
+    } finally {
+      isTokenSpy.mockRestore();
+      downloadSpy.mockRestore();
+      URL.createObjectURL = origCreate;
+      URL.revokeObjectURL = origRevoke;
+      act(() => {
+        useWineStore.setState({ storageMode: 'local_test', googleConnected: false });
+      });
     }
   });
 });

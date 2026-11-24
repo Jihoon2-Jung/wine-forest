@@ -31,7 +31,7 @@ export function HistoryCard({ tasting, bottle, wine, locations }: HistoryCardPro
       : locations[0]?.id ?? '',
   );
 
-  // M7 + Phase 2-2 보강: 소비/선물 이력 + 별점·동반자·시음노트 수정
+  // M7 + Phase 2-2/2-3A 보강: 소비/선물 이력 + 별점·동반자·시음노트·사진 수정 (저장/취소 시 파일 정합성 보장)
   const [editing, setEditing] = useState(false);
   const [draftType, setDraftType] = useState<'CONSUMED' | 'GIFTED'>(tasting.type);
   const [draftDate, setDraftDate] = useState(tasting.eventDate ?? '');
@@ -41,8 +41,38 @@ export function HistoryCard({ tasting, bottle, wine, locations }: HistoryCardPro
   const [draftCompanions, setDraftCompanions] = useState(tasting.companions ?? '');
   const [draftTastingNote, setDraftTastingNote] = useState(tasting.tastingNote ?? '');
   const [draftPhotoFileIds, setDraftPhotoFileIds] = useState<string[]>(tasting.photoFileIds ?? []);
+  const [pendingAddedPhotoIds, setPendingAddedPhotoIds] = useState<string[]>([]);
+  const [pendingRemovedPhotoIds, setPendingRemovedPhotoIds] = useState<string[]>([]);
 
   const isGift = tasting.type === 'GIFTED';
+
+  const resetDraftFromTasting = () => {
+    setDraftType(tasting.type);
+    setDraftDate(tasting.eventDate ?? '');
+    setDraftOccasion(tasting.occasion ?? '');
+    setDraftMemo(tasting.memo ?? '');
+    setDraftRating(tasting.rating ?? null);
+    setDraftCompanions(tasting.companions ?? '');
+    setDraftTastingNote(tasting.tastingNote ?? '');
+    setDraftPhotoFileIds(tasting.photoFileIds ?? []);
+    setPendingAddedPhotoIds([]);
+    setPendingRemovedPhotoIds([]);
+  };
+
+  const handleOpenEdit = () => {
+    resetDraftFromTasting();
+    setRestoring(false);
+    setEditing(true);
+  };
+
+  const handleCancelEdit = () => {
+    // 편집 중 새로 업로드했다가 취소한 파일만 Drive/캐시에서 정리 (기존 저장 사진은 보존)
+    for (const addedId of pendingAddedPhotoIds) {
+      void deleteTastingPhotoFile(addedId);
+    }
+    resetDraftFromTasting();
+    setEditing(false);
+  };
 
   const handleConfirmRestore = async () => {
     await restoreBottleToStock(bottle.id, restoreLocId || null);
@@ -60,6 +90,12 @@ export function HistoryCard({ tasting, bottle, wine, locations }: HistoryCardPro
       tastingNote: draftTastingNote,
       photoFileIds: draftPhotoFileIds,
     });
+    // 저장 확정 시에만 기존 사진 삭제 예약분을 실제로 제거
+    for (const removedId of pendingRemovedPhotoIds) {
+      void deleteTastingPhotoFile(removedId);
+    }
+    setPendingAddedPhotoIds([]);
+    setPendingRemovedPhotoIds([]);
     setEditing(false);
   };
 
@@ -138,8 +174,11 @@ export function HistoryCard({ tasting, bottle, wine, locations }: HistoryCardPro
             <button
               type="button"
               onClick={() => {
-                setEditing((v) => !v);
-                setRestoring(false);
+                if (editing) {
+                  handleCancelEdit();
+                } else {
+                  handleOpenEdit();
+                }
               }}
               className="rounded-lg border border-subtle bg-elevated p-1.5 text-secondary hover:text-primary"
               title="이력 수정"
@@ -150,8 +189,10 @@ export function HistoryCard({ tasting, bottle, wine, locations }: HistoryCardPro
             <button
               type="button"
               onClick={() => {
+                if (editing) {
+                  handleCancelEdit();
+                }
                 setRestoring((v) => !v);
-                setEditing(false);
               }}
               className="inline-flex items-center gap-1 rounded-lg border border-subtle bg-elevated px-2.5 py-1.5 text-[11px] font-bold text-secondary hover:border-forest hover:text-forest"
             >
@@ -268,6 +309,7 @@ export function HistoryCard({ tasting, bottle, wine, locations }: HistoryCardPro
                       const uploadedId = await uploadTastingPhoto(blob);
                       if (uploadedId) {
                         setDraftPhotoFileIds((prev) => [...prev, uploadedId]);
+                        setPendingAddedPhotoIds((prev) => [...prev, uploadedId]);
                       }
                     } finally {
                       setUploadingPhoto(false);
@@ -289,7 +331,16 @@ export function HistoryCard({ tasting, bottle, wine, locations }: HistoryCardPro
                     onClick={() => setLightboxFileId(pid)}
                     onRemove={() => {
                       setDraftPhotoFileIds((prev) => prev.filter((id) => id !== pid));
-                      void deleteTastingPhotoFile(pid);
+                      if (pendingAddedPhotoIds.includes(pid)) {
+                        // 이번 편집에서 새로 올린 미저장 파일은 즉시 정리
+                        setPendingAddedPhotoIds((prev) => prev.filter((id) => id !== pid));
+                        void deleteTastingPhotoFile(pid);
+                      } else {
+                        // 기존 저장 사진은 [저장] 클릭 시점까지 삭제 보류
+                        setPendingRemovedPhotoIds((prev) =>
+                          prev.includes(pid) ? prev : [...prev, pid],
+                        );
+                      }
                     }}
                   />
                 ))}
@@ -299,7 +350,7 @@ export function HistoryCard({ tasting, bottle, wine, locations }: HistoryCardPro
           <div className="flex justify-end gap-1.5">
             <button
               type="button"
-              onClick={() => setEditing(false)}
+              onClick={handleCancelEdit}
               className="inline-flex items-center gap-1 rounded-lg border border-subtle bg-surface px-2.5 py-1 text-xs font-semibold text-secondary"
             >
               <X className="h-3.5 w-3.5" />

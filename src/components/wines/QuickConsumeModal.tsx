@@ -88,10 +88,19 @@ export function QuickConsumeModal({
     }
   };
 
+  const handleClose = () => {
+    // 저장하지 않고 닫을 때 미리 업로드해 둔 시음 사진 고아 파일 정리
+    for (const pid of photoFileIds) {
+      void deleteTastingPhotoFile(pid);
+    }
+    setPhotoFileIds([]);
+    onClose();
+  };
+
   return (
     <BottomSheet
       open={open}
-      onClose={onClose}
+      onClose={handleClose}
       title={eventType === 'CONSUMED' ? '와인 소비 완료' : '선물 · 양도 기록'}
       subtitle={`${wine.name} (${wine.vintage})`}
     >

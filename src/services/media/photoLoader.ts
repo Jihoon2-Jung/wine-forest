@@ -85,11 +85,12 @@ export async function resolvePhotoUrl(
 
 /**
  * React Hook: fileId에 대응하는 로컬 캐시/Drive 이미지 URL을 비동기 로드
- * (재인증 완료 시 googleConnected 변화에 반응해 미캐싱 Drive 사진도 자동 로드)
+ * (토큰 만료 후 재인증 완료 시 authRevision 증가에 반응해 미캐싱 Drive 사진도 자동 재로딩)
  */
 export function usePhotoUrl(fileId: string | null | undefined): string | null {
   const storageMode = useWineStore((s) => s.storageMode);
   const googleConnected = useWineStore((s) => s.googleConnected);
+  const authRevision = useWineStore((s) => s.authRevision);
   const [url, setUrl] = useState<string | null>(() => {
     if (!fileId) return null;
     if (fileId.startsWith('http://') || fileId.startsWith('https://') || fileId.startsWith('data:')) {
@@ -110,7 +111,7 @@ export function usePhotoUrl(fileId: string | null | undefined): string | null {
     return () => {
       active = false;
     };
-  }, [fileId, storageMode, googleConnected]);
+  }, [fileId, storageMode, googleConnected, authRevision]);
 
   return url;
 }

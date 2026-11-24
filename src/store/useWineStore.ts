@@ -215,6 +215,7 @@ interface WineStoreState {
   isHydrated: boolean;
   storageMode: StorageMode;
   googleConnected: boolean;
+  authRevision: number;
   fileId: string | null;
   lastSyncedModifiedTime: string | null;
   hasUnsyncedChanges: boolean;
@@ -419,6 +420,7 @@ export const useWineStore = create<WineStoreState>((set, get) => {
     isHydrated: false,
     storageMode: hasGoogleClientId() ? 'google_drive' : 'local_test',
     googleConnected: false,
+    authRevision: 0,
     fileId: null,
     lastSyncedModifiedTime: null,
     hasUnsyncedChanges: false,
@@ -496,6 +498,7 @@ export const useWineStore = create<WineStoreState>((set, get) => {
       set({
         storageMode: 'google_drive',
         googleConnected: true,
+        authRevision: get().authRevision + 1,
         syncStatus: 'syncing',
         syncError: null,
       });
@@ -580,6 +583,7 @@ export const useWineStore = create<WineStoreState>((set, get) => {
 
       try {
         await requestAccessToken();
+        set({ authRevision: get().authRevision + 1 });
         googleDriveAdapter.resetWorkspaceCache();
         const currentDb = get().db;
         const found = await googleDriveAdapter.findDbFile();
@@ -754,7 +758,11 @@ export const useWineStore = create<WineStoreState>((set, get) => {
       // 반드시 클릭 핸들러 동기 컨텍스트에서 requestAccessToken() 호출
       try {
         await requestAccessToken();
-        set({ googleConnected: true, syncError: null });
+        set({
+          googleConnected: true,
+          authRevision: get().authRevision + 1,
+          syncError: null,
+        });
       } catch (err) {
         const msg = err instanceof Error ? err.message : '구글 재인증에 실패했습니다.';
         get().showToast(msg, 'error');

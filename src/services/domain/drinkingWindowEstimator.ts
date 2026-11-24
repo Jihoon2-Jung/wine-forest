@@ -16,9 +16,23 @@ export interface DrinkingWindowEstimate {
   basis: string;
 }
 
-const GRAND_CRU_RE =
-  /grand\s*cru|그랑\s*크뤼|에세죠|echezeaux|클로\s*드\s*부조|clos\s*de\s*vougeot|샹베르탱|chambertin|로마네|roman[eé]e|뮈지니|musigny|꼬르통|corton|몽라쉐|montrachet|라\s*타슈|la\s*tache|리쉬부르|richebourg/i;
+/**
+ * 부르고뉴 빌라쥬(마을) 명칭에 그랑크뤼 밭 이름이 포함된 오탐 방지용 정제:
+ * 예) 'Gevrey-Chambertin' / '쥬브레 샹베르탱', 'Vosne-Romanée' / '본 로마네',
+ *     'Chambolle-Musigny' / '샹볼 뮈지니', 'Chassagne/Puligny-Montrachet' / '샤샤뉴·퓔리니 몽라쉐',
+ *     'Aloxe-Corton' / '알록스 꼬르똥'은 빌라쥬 명칭이므로 먼저 제거한 뒤 그랑크뤼 밭명을 판별합니다.
+ */
+const VILLAGE_HYPHEN_STRIP_RE =
+  /gevrey[\s-]*chambertin|쥬브레[\s-]*샹베르탱|vosne[\s-]*roman[eé]e|본[\s-]*로마네|chambolle[\s-]*musigny|샹볼[\s-]*뮈지니|chassagne[\s-]*montrachet|샤샤뉴[\s-]*몽라쉐|puligny[\s-]*montrachet|퓔리니[\s-]*몽라쉐|aloxe[\s-]*corton|알록스[\s-]*꼬르[통똥]/gi;
+
+const EXPLICIT_GRAND_CRU_RE =
+  /grand\s*cru|그랑\s*크뤼|에세죠|echezeaux|클로\s*드\s*부조|clos\s*de\s*vougeot|라\s*타슈|la\s*t[aâ]che|리쉬부르|richebourg|로마네[\s-]*(콩티|생[\s-]*비방)|roman[eé]e[\s-]*(conti|saint[\s-]*vivant|st[\s-]*vivant)|바타르[\s-]*몽라쉐|b[aâ]tard[\s-]*montrachet|슈발리에[\s-]*몽라쉐|chevalier[\s-]*montrachet|꼬르[통똥][\s-]*샤를마뉴|corton[\s-]*charlemagne|클로\s*드\s*베즈|clos\s*de\s*b[eè]ze|(mazis|charmes|griotte|latrici[eè]res|ruchottes|chapelle|mazoy[eè]res)[\s-]*chambertin|본[\s-]*마르|bonnes[\s-]*mares|클로\s*(생[\s-]*드니|드\s*라\s*로쉬|드\s*타르|데\s*랑브레)|clos\s*(saint[\s-]*denis|de\s*la\s*roche|de\s*tart|des\s*lambrays)/i;
+
+const STANDALONE_GRAND_CRU_RE =
+  /\b(chambertin|musigny|corton|montrachet)\b|(^|[\s,])(샹베르탱|뮈지니|꼬르[통똥]|몽라쉐)([\s,]|$)/i;
+
 const PREMIER_CRU_RE = /1er\s*cru|premier\s*cru|프리미어\s*크뤼/i;
+
 const BORDEAUX_TOP_COMMUNES = new Set([
   '뽀이약',
   '생줄리앙',
@@ -44,6 +58,7 @@ const BURGUNDY_WHITE_TOP_COMMUNES = new Set([
   '샤샤뉴 몽라쉐',
   '퓔리니 몽라쉐',
   '꼬르통',
+  '꼬르똥',
   '본',
 ]);
 const NORTHERN_RHONE_COMMUNES = new Set([
@@ -53,6 +68,15 @@ const NORTHERN_RHONE_COMMUNES = new Set([
   '생 조셉',
   '코르나스',
 ]);
+
+function isBurgundyGrandCru(name: string, subRegion: string): boolean {
+  const combined = `${name} ${subRegion}`;
+  if (EXPLICIT_GRAND_CRU_RE.test(combined)) {
+    return true;
+  }
+  const stripped = combined.replace(VILLAGE_HYPHEN_STRIP_RE, ' ');
+  return STANDALONE_GRAND_CRU_RE.test(stripped);
+}
 
 /**
  * Wine Spectator · Robert Parker(Wine Advocate) · Wine Society 지역·빈티지 차트 기반
@@ -86,7 +110,32 @@ export function estimateDrinkingWindow(
   const v = Number(vintageClean);
   if (v < 1900 || v > 2100) return null;
 
-  const isGrandCru = GRAND_CRU_RE.test(combinedText);
+  // 2) 로제(RO)는 지역 불문 신선 음용이 기본 (레드 장기 숙성 오분류 방지)
+  if (input.color === 'RO') {
+    return {
+      start: v + 1,
+      end: v + 3,
+      basis: '로제 와인 기준',
+    };
+  }
+
+  // 3) 스파클링(SP): 상파뉴 빈티지만 장기 숙성(+7~+20), 크레망·카바·프로세코 등은 중단기
+  if (input.color === 'SP') {
+    const isChampagne = region === '상파뉴' || /champagne|상파뉴|샴페인/i.test(combinedText);
+    if (isChampagne) {
+      return { start: v + 7, end: v + 20, basis: '상파뉴 빈티지 기준' };
+    }
+    const isCremant = /cr[eé]mant|크레망/i.test(combinedText) || country === '프랑스';
+    if (isCremant) {
+      return { start: v + 2, end: v + 6, basis: '크레망/프랑스 스파클링 기준' };
+    }
+    if (country === '스페인') {
+      return { start: v + 2, end: v + 7, basis: '스페인 카바/스파클링 기준' };
+    }
+    return { start: v + 2, end: v + 6, basis: '일반 스파클링 기준' };
+  }
+
+  const isGrandCru = isBurgundyGrandCru(name, subRegion);
   const isPremierCru = PREMIER_CRU_RE.test(combinedText);
 
   let startOffset = 2;
@@ -94,7 +143,7 @@ export function estimateDrinkingWindow(
   let basis = '일반 레드 기준';
   let vintageBucket: 'bordeaux' | 'burgundy' | 'piedmont' | 'tuscany' | 'napa' | null = null;
 
-  // 2) 지역 · 등급 · 색상별 기본 숙성 오프셋
+  // 4) 지역 · 등급 · 색상별 기본 숙성 오프셋
   if (region === '보르도' || subRegion === '소떼른' || subRegion === '바르삭') {
     if (input.color === 'SW' || subRegion === '소떼른' || subRegion === '바르삭') {
       startOffset = 8;
@@ -108,8 +157,7 @@ export function estimateDrinkingWindow(
     } else {
       const isTopBordeaux =
         BORDEAUX_TOP_COMMUNES.has(subRegion) ||
-        isGrandCru ||
-        /cru\s*class[eé]|그랑\s*크뤼/i.test(combinedText);
+        /grand\s*cru|cru\s*class[eé]|그랑\s*크뤼/i.test(combinedText);
       startOffset = isTopBordeaux ? 8 : 4;
       endOffset = isTopBordeaux ? 25 : 12;
       basis = isTopBordeaux ? '보르도 그랑크뤼/주요 마을(레드) 기준' : '보르도 일반(레드) 기준';
@@ -145,6 +193,10 @@ export function estimateDrinkingWindow(
         basis = '부르고뉴 화이트 빌라쥬/지역급 기준';
       }
       vintageBucket = 'burgundy';
+    } else if (input.color === 'SW') {
+      startOffset = 5;
+      endOffset = 18;
+      basis = '부르고뉴 스위트 기준';
     } else {
       if (isGrandCru) {
         startOffset = 7;
@@ -161,16 +213,23 @@ export function estimateDrinkingWindow(
       }
       vintageBucket = 'burgundy';
     }
-  } else if (region === '상파뉴' || (country === '프랑스' && input.color === 'SP')) {
-    startOffset = 7;
-    endOffset = 20;
-    basis = '상파뉴 빈티지 기준';
   } else if (region === '론') {
-    if (NORTHERN_RHONE_COMMUNES.has(subRegion) || /c[oô]te[\s-]r[oô]tie|hermitage|cornas/i.test(combinedText)) {
+    if (input.color === 'W') {
+      startOffset = 2;
+      endOffset = 8;
+      basis = '론 화이트 기준';
+    } else if (input.color === 'SW') {
+      startOffset = 5;
+      endOffset = 18;
+      basis = '론 스위트 기준';
+    } else if (
+      NORTHERN_RHONE_COMMUNES.has(subRegion) ||
+      /c[oô]te[\s-]r[oô]tie|hermitage|cornas/i.test(combinedText)
+    ) {
       startOffset = 6;
       endOffset = 20;
       basis = '북부 론(시라) 기준';
-    } else if (/ch[aâ]teauneuf|cdp|샤토뇌프|지공다스|gigondas/i.test(combinedText)) {
+    } else if (/ch[aâ]teauneuf|cdp|샤[토또]뇌프|지공다스|gigondas/i.test(combinedText)) {
       startOffset = 5;
       endOffset = 16;
       basis = '남부 론(CDP/지공다스) 기준';
@@ -194,12 +253,15 @@ export function estimateDrinkingWindow(
       basis = `${region} 레드 기준`;
     }
   } else if (region === '피에몬테') {
-    if (subRegion === '바롤로' || /barolo|바롤로/i.test(combinedText)) {
+    if (input.color === 'R' && (subRegion === '바롤로' || /barolo|바롤로/i.test(combinedText))) {
       startOffset = 9;
       endOffset = 26;
       basis = '피에몬테 바롤로 기준';
       vintageBucket = 'piedmont';
-    } else if (subRegion === '바르바레스코' || /barbaresco|바르바레스코/i.test(combinedText)) {
+    } else if (
+      input.color === 'R' &&
+      (subRegion === '바르바레스코' || /barbaresco|바르바레스코/i.test(combinedText))
+    ) {
       startOffset = 7;
       endOffset = 20;
       basis = '피에몬테 바르바레스코 기준';
@@ -208,18 +270,33 @@ export function estimateDrinkingWindow(
       startOffset = 3;
       endOffset = 10;
       basis = '피에몬테 레드 기준';
+    } else if (input.color === 'SW') {
+      startOffset = 2;
+      endOffset = 7;
+      basis = '피에몬테 스위트 기준';
     } else {
       startOffset = 1;
       endOffset = 5;
-      basis = '피에몬테 화이트/스파클링 기준';
+      basis = '피에몬테 화이트 기준';
     }
   } else if (region === '토스카나') {
-    if (subRegion === '몬탈치노' || /brunello|bdm|브루넬로/i.test(combinedText)) {
+    if (input.color === 'W') {
+      startOffset = 1;
+      endOffset = 6;
+      basis = '토스카나 화이트 기준';
+    } else if (input.color === 'SW') {
+      startOffset = 5;
+      endOffset = 20;
+      basis = '토스카나 빈 산토/스위트 기준';
+    } else if (subRegion === '몬탈치노' || /brunello|bdm|브루넬로/i.test(combinedText)) {
       startOffset = 7;
       endOffset = 22;
       basis = '토스카나 브루넬로 디 몬탈치노 기준';
       vintageBucket = 'tuscany';
-    } else if (subRegion === '볼게리' || /bolgheri|sassicaia|ornellaia|tignanello|solaia|볼게리/i.test(combinedText)) {
+    } else if (
+      subRegion === '볼게리' ||
+      /bolgheri|sassicaia|ornellaia|tignanello|solaia|볼게리/i.test(combinedText)
+    ) {
       startOffset = 6;
       endOffset = 20;
       basis = '토스카나 볼게리/수퍼투스칸 기준';
@@ -228,16 +305,12 @@ export function estimateDrinkingWindow(
       startOffset = 3;
       endOffset = 12;
       basis = '토스카나 키안티 기준';
-    } else if (input.color === 'R') {
+    } else {
       startOffset = 4;
       endOffset = 12;
       basis = '토스카나 레드 기준';
-    } else {
-      startOffset = 1;
-      endOffset = 6;
-      basis = '토스카나 화이트/기타 기준';
     }
-  } else if (country === '이탈리아' && /amarone|아마로네/i.test(combinedText)) {
+  } else if (country === '이탈리아' && input.color === 'R' && /amarone|아마로네/i.test(combinedText)) {
     startOffset = 7;
     endOffset = 22;
     basis = '베네토 아마로네 기준';
@@ -285,10 +358,10 @@ export function estimateDrinkingWindow(
       startOffset = 6;
       endOffset = 28;
       basis = `${country} 주정강화/스위트 기준`;
-    } else if (input.color === 'SP') {
+    } else if (input.color === 'W') {
       startOffset = 2;
-      endOffset = 7;
-      basis = '스페인 카바/스파클링 기준';
+      endOffset = 8;
+      basis = `${country} 화이트 기준`;
     } else if (/gran\s*reserva|그랑\s*리세르바/i.test(combinedText)) {
       startOffset = 8;
       endOffset = 26;
@@ -298,9 +371,9 @@ export function estimateDrinkingWindow(
       endOffset = 20;
       basis = `스페인 ${region} 기준`;
     } else {
-      startOffset = input.color === 'R' ? 3 : 1;
-      endOffset = input.color === 'R' ? 10 : 5;
-      basis = `${country} 일반 기준`;
+      startOffset = 3;
+      endOffset = 10;
+      basis = `${country} 레드 기준`;
     }
   } else if (country === '호주' || country === '뉴질랜드' || country === '칠레' || country === '아르헨티나') {
     if (input.color === 'R') {
@@ -311,14 +384,10 @@ export function estimateDrinkingWindow(
       startOffset = 1;
       endOffset = 6;
       basis = `${country} 화이트 기준`;
-    } else if (input.color === 'SW') {
+    } else {
       startOffset = 5;
       endOffset = 18;
       basis = `${country} 스위트 기준`;
-    } else {
-      startOffset = 1;
-      endOffset = 4;
-      basis = `${country} 스파클링/로제 기준`;
     }
   } else {
     // 색상별 일반 폴백
@@ -326,14 +395,6 @@ export function estimateDrinkingWindow(
       startOffset = 5;
       endOffset = 20;
       basis = '일반 스위트/주정강화 기준';
-    } else if (input.color === 'SP') {
-      startOffset = 2;
-      endOffset = 8;
-      basis = '일반 스파클링 기준';
-    } else if (input.color === 'RO') {
-      startOffset = 1;
-      endOffset = 3;
-      basis = '일반 로제 기준';
     } else if (input.color === 'W') {
       startOffset = 1;
       endOffset = 5;
@@ -345,7 +406,7 @@ export function estimateDrinkingWindow(
     }
   }
 
-  // 3) 주요 빈티지 작황 보정 (Wine Spectator & Wine Advocate 종합)
+  // 5) 주요 빈티지 작황 보정 (Wine Spectator & Wine Advocate 종합)
   let vintageAdjStart = 0;
   let vintageAdjEnd = 0;
   let vintageNote = '';
