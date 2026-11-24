@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">JH Wine Forest</string>
+    <string name="title_activity_main">JH Wine Forest</string>
+    <string name="package_name">com.jihoon.wineforest</string>
+    <string name="custom_url_scheme">com.jihoon.wineforest</string>
+</resources>

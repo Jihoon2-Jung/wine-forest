@@ -1,7 +1,7 @@
 # JH Wine Forest — 모바일 앱(iOS / Android) 전환 마스터 구현 계획 (Mobile v1.0)
 
 > **연관 문서 (모바일 시리즈):**
-> - **상태:** **READY FOR M1 — 웹 Phase 2 (2-1·2-2·2-3A) 및 모바일 호환 5원칙 선반영 완료 (사용자 지시 시 모바일 M1 즉시 착수 가능)**
+> - **상태:** **M1~M3 COMPLETED — 공통 코드(`src/`) · iOS/Android 스캐폴딩 · `GoogleDriveAuth` 네이티브 플러그인 구현 및 푸시 완료 (Windows M6 즉시 착수 가능 / Mac은 Xcode 설치 후 M4~M5 진행)**
 > - **마스터 구현 계획:** `MOBILE_IMPLEMENTATION_PLAN.md` (본 문서)
 > - **Mac · iOS(+공통 코드 & Android 선행) 개발 작업지시서:** [SPEC_MOBILE_IOS.md](./SPEC_MOBILE_IOS.md)
 > - **Windows · Android 빌드/배포 실전 가이드:** [GUIDE_WIN_ANDROID.md](./GUIDE_WIN_ANDROID.md)
@@ -25,7 +25,7 @@
 | **OAuth 동의 화면 상태** | **프로덕션(Production) 게시 전환** | Refresh Token 7일 만료 제한 해제 → **사실상 영구 자동 로그인** (`drive.file`은 비민감 스코프) |
 | **iOS 의존성 및 서명** | **SPM (`CapApp-SPM`) + 무료 Personal Team USB 설치** | CocoaPods 미설치로 Mac 디스크 절약 (추후 연 \$99 TestFlight 업그레이드 가능) |
 | **1차 포함 모바일 UX** | ① JSON 내보내기 네이티브 공유 시트<br>② OS 상태바 라이트/다크 자동 연동<br>③ Android 뒤로가기(모달/라우트) 처리 | 햅틱 진동(`@capacitor/haptics`)·CI Android APK 자동 빌드는 1차 범위 제외 |
-| **현재 작업 순서** | **경로 A (웹 Phase 2 선행 구현 → 완료 후 모바일 전환 착수, 현재 네이티브 구현 ON HOLD)** | 사전 밑작업(`.gitattributes`, `.gitignore`, 호환 가이드)만 선반영 |
+| **현재 작업 순서** | **M1~M3 구현 완료 (웹 Phase 2 선반영 + 공통 코드 + `ios/`·`android/` 선행 푸시 완료)** | 다음 단계: Windows Android 빌드(M6) 및 Mac Xcode M4~M5 |
 
 ---
 
@@ -43,7 +43,7 @@ flowchart TD
     REPO --> AND_DIR
 
     SRC -->|"npm run build (base: '/wine-forest/' + PWA)"| WEB["GitHub Pages (PC/모바일 웹 PWA)"]
-    SRC -->|"npm run build:mobile (base: './')"| CAP_DIST["dist/ Capacitor 번들"]
+    SRC -->|"npm run build:mobile (mode: capacitor, base: './')"| CAP_DIST["dist/ Capacitor 번들"]
 
     CAP_DIST -->|"Mac: npx cap sync ios"| MAC["Mac (Xcode + SPM + Personal Team)"]
     IOS_DIR --> MAC
@@ -70,7 +70,7 @@ flowchart TD
 | 대상 경로 | 변경 유형 | 변경 내용 요약 |
 | :--- | :---: | :--- |
 | `package.json` | 수정 | Capacitor 8 코어·플랫폼·공식 플러그인(`app`, `status-bar`, `filesystem`, `share`) 및 `build:mobile`, `cap:sync:*`, `cap:open:*` 스크립트 추가 |
-| `vite.config.ts` | 수정 | `process.env.BUILD_TARGET === 'capacitor'`일 때 `base: './'` 적용 및 `VitePWA` 비활성화 (웹 기본 빌드는 `/wine-forest/` + PWA 유지) |
+| `vite.config.ts` | 수정 | `mode === 'capacitor'` 또는 `BUILD_TARGET=capacitor`일 때 `base: './'` 적용 및 `VitePWA` 비활성화 (웹 기본 빌드는 `/wine-forest/` + PWA 유지) |
 | `capacitor.config.ts` | 신규 | `appId: 'com.jihoon.wineforest'`, `appName: 'JH Wine Forest'`, `webDir: 'dist'`, iOS `contentInset` 및 플러그인 옵션 정의 |
 | `.gitignore` | 수정 | `ios/App/Config/Local.xcconfig`, `*.keystore`, `*.jks`, `keystore.properties`, `*.p12`, `*.mobileprovision`, `GoogleService-Info.plist` 차단 추가 |
 | `.gitattributes` | 신규 | Mac/Windows 간 `gradlew`, `*.sh`, `*.bat`, `*.swift`, `*.kt` 줄바꿈(LF/CRLF) 충돌 방지 규칙 명시 |

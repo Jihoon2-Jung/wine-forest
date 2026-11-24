@@ -1,0 +1,4 @@
+// Shared iOS build settings. Personal Client IDs belong in gitignored Local.xcconfig.
+GOOGLE_IOS_CLIENT_ID =
+GOOGLE_IOS_REVERSED_CLIENT_ID =
+#include? "Local.xcconfig"

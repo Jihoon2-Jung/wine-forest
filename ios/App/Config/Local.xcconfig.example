@@ -1,0 +1,4 @@
+// 이 파일을 같은 폴더의 Local.xcconfig 로 복사한 뒤 실제 Google Cloud iOS OAuth Client ID를 입력하세요.
+// Local.xcconfig 는 .gitignore 에 의해 Git 커밋이 차단됩니다.
+GOOGLE_IOS_CLIENT_ID = YOUR_IOS_CLIENT_ID.apps.googleusercontent.com
+GOOGLE_IOS_REVERSED_CLIENT_ID = com.googleusercontent.apps.YOUR_IOS_CLIENT_ID

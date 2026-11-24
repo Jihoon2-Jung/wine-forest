@@ -1,7 +1,7 @@
 # JH Wine Forest — 모바일(iOS 중심 + 공통/Android 선행) 개발 작업지시서 (`SPEC_MOBILE_IOS.md`)
 
 > **문서 안내:** 본 문서는 [MOBILE_IMPLEMENTATION_PLAN.md](./MOBILE_IMPLEMENTATION_PLAN.md)의 세부 실행 명세서입니다.
-> - **상태:** **READY FOR M1 — 웹 Phase 2 (2-1·2-2·2-3A) 및 단일 미디어 진입점(`photoPicker.ts`) 선반영 완료**
+> - **상태:** **M1~M3 COMPLETED — 공통 코드 · iOS/Android 스캐폴딩 · `GoogleDriveAuth` 플러그인 작성 완료 (Xcode 설치 후 M4~M5 진행)**
 > Mac 환경에서 **공통 코드(`src/`) 리팩토링, iOS 네이티브(`ios/`) 구현, Android 선행 스캐폴딩(`android/`) 작성**까지 누락 없이 구현·검증할 수 있도록 상세 지침을 제공합니다.
 > Windows PC에서의 Android Keystore 생성 및 빌드는 [GUIDE_WIN_ANDROID.md](./GUIDE_WIN_ANDROID.md)로 이어집니다.
 
@@ -89,7 +89,7 @@ gradlew text eol=lf
 ### 2.1 `vite.config.ts` 듀얼 타겟 분기
 기존 [vite.config.ts](../vite.config.ts)의 GitHub Pages 배포(`base: '/wine-forest/'` + `VitePWA`)를 그대로 보존하면서, 모바일 번들 빌드 시에만 상대 경로와 서비스워커 비활성화를 적용합니다.
 
-* **분기 기준:** `const isCapacitorBuild = process.env.BUILD_TARGET === 'capacitor';`
+* **분기 기준:** `mode === 'capacitor'` (또는 `BUILD_TARGET === 'capacitor'`) — `--mode capacitor` 사용으로 Mac/Windows PowerShell 양쪽에서 동일하게 동작
 * **적용 규칙:**
   * `base`: `isCapacitorBuild ? './' : '/wine-forest/'`
   * `plugins`: `VitePWA(...)`는 `!isCapacitorBuild`일 때만 포함 (`!isCapacitorBuild && VitePWA({...})`).
@@ -127,7 +127,7 @@ export default config;
 ```json
 {
   "scripts": {
-    "build:mobile": "tsc --noEmit && BUILD_TARGET=capacitor vite build",
+    "build:mobile": "tsc --noEmit && vite build --mode capacitor",
     "cap:sync:ios": "npm run build:mobile && npx cap sync ios",
     "cap:sync:android": "npm run build:mobile && npx cap sync android",
     "cap:open:ios": "npx cap open ios",
@@ -421,7 +421,7 @@ Windows PC에서 `git pull` 후 바로 빌드만 진행할 수 있도록 Mac에�
        * `authorize()` 결과 `hasResolution() == false`이면 **UI 팝업 없이 새 `accessToken`을 즉시 반환**합니다.
        * 만약 `hasResolution() == true`라면(최초 로그인 전이거나 사용자가 권한을 철회한 상태), 무음 복원/무음 갱신에서는 UI를 강제로 띄우지 않고 `"SESSION_EXPIRED"`(또는 `restoreSession`의 미로그인 응답)를 반환해 앱 부팅 시 팝업이 튀어나오는 것을 막습니다.
   3. **`signOut`:**
-     * `lastAccessToken`이 있으면 `clearToken(...)` 호출 및 `Identity.getAuthorizationClient(activity).revokeAccess(RevokeAccessRequest.builder().build())` 실행 후 `resolve()`.
+     * `lastAccessToken`이 있으면 `clearToken(...)` 호출 및 `lastAccount`가 있는 경우에만 `Identity.getAuthorizationClient(activity).revokeAccess(RevokeAccessRequest.builder().setAccount(account).setScopes(listOf(driveScope)).build())` 실행 후 `resolve()`. (빈 `RevokeAccessRequest` 호출 시 런타임 예외가 나므로 계정 존재 시에만 안전 호출)
 
 ### 6.3 `MainActivity` 플러그인 등록 (순서 엄수!)
 위치: `android/app/src/main/java/com/jihoon/wineforest/MainActivity.kt` (또는 `.java` 템플릿 유지 시 Java/Kotlin 선택)
