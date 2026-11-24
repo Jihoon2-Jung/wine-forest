@@ -10,6 +10,7 @@ import {
   getDrinkingWindowStatus,
   sortBottlesFifo,
 } from '@/services/domain/wineHelpers';
+import { estimateDrinkingWindow } from '@/services/domain/drinkingWindowEstimator';
 import { pickImageFile } from '@/services/media/photoPicker';
 import { useWineStore } from '@/store/useWineStore';
 import { BottomSheet } from '@/components/common/BottomSheet';
@@ -336,25 +337,50 @@ export function WineDetailSheet({ wineId, onClose }: WineDetailSheetProps) {
                 placeholder="생산자 (선택)"
                 className="w-full rounded-xl border border-subtle bg-surface px-3 py-2 text-xs text-primary"
               />
-              <div className="grid grid-cols-2 gap-2">
-                <input
-                  type="number"
-                  min={1900}
-                  max={2150}
-                  value={draftDwStart}
-                  onChange={(e) => setDraftDwStart(e.target.value)}
-                  placeholder="음용 적기 시작연도 (예: 2026)"
-                  className="rounded-xl border border-subtle bg-surface px-3 py-2 text-xs tabular-nums text-primary"
-                />
-                <input
-                  type="number"
-                  min={1900}
-                  max={2150}
-                  value={draftDwEnd}
-                  onChange={(e) => setDraftDwEnd(e.target.value)}
-                  placeholder="음용 적기 종료연도 (예: 2032)"
-                  className="rounded-xl border border-subtle bg-surface px-3 py-2 text-xs tabular-nums text-primary"
-                />
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between text-[11px]">
+                  <span className="font-semibold text-secondary">음용 적기 (시작 ~ 종료연도)</span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const est = estimateDrinkingWindow({
+                        name: draftName,
+                        country: draftCountry,
+                        region: draftRegion,
+                        subRegion: draftSubRegion,
+                        color: draftColor,
+                        vintage: draftVintage,
+                      });
+                      if (est) {
+                        setDraftDwStart(String(est.start));
+                        setDraftDwEnd(String(est.end));
+                      }
+                    }}
+                    className="font-bold text-forest hover:underline"
+                  >
+                    ✨ 지역·빈티지 추천값 채우기
+                  </button>
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <input
+                    type="number"
+                    min={1900}
+                    max={2150}
+                    value={draftDwStart}
+                    onChange={(e) => setDraftDwStart(e.target.value)}
+                    placeholder="음용 적기 시작연도 (예: 2026)"
+                    className="rounded-xl border border-subtle bg-surface px-3 py-2 text-xs tabular-nums text-primary"
+                  />
+                  <input
+                    type="number"
+                    min={1900}
+                    max={2150}
+                    value={draftDwEnd}
+                    onChange={(e) => setDraftDwEnd(e.target.value)}
+                    placeholder="음용 적기 종료연도 (예: 2032)"
+                    className="rounded-xl border border-subtle bg-surface px-3 py-2 text-xs tabular-nums text-primary"
+                  />
+                </div>
               </div>
               <div className="flex justify-end gap-2">
                 <button

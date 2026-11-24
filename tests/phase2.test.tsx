@@ -7,6 +7,7 @@ import {
   formatDrinkingWindowRange,
   getDrinkingWindowStatus,
 } from '@/services/domain/wineHelpers';
+import { estimateDrinkingWindow } from '@/services/domain/drinkingWindowEstimator';
 import { computeScaledDimensions } from '@/services/media/imageProcessor';
 import { pickImageFile } from '@/services/media/photoPicker';
 import { createDemoDatabase } from '@/services/storage/defaultTemplates';
@@ -62,6 +63,76 @@ describe('Phase 2-1 — Drinking Window Logic & Stats', () => {
     expect(summary.configuredBottles).toBe(
       summary.readyBottles + summary.closingSoonBottles + summary.pastPeakBottles + summary.tooYoungBottles,
     );
+  });
+
+  it('estimates drinking windows from regional/grade/vintage chart and handles NV', () => {
+    const bdx2019 = estimateDrinkingWindow({
+      name: 'Chateau Talbot',
+      country: '프랑스',
+      region: '보르도',
+      subRegion: '생줄리앙',
+      color: 'R',
+      vintage: '2019',
+    });
+    expect(bdx2019).toEqual(expect.objectContaining({ start: 2028, end: 2047 }));
+
+    const bdx2017 = estimateDrinkingWindow({
+      name: 'Chateau Talbot',
+      country: '프랑스',
+      region: '보르도',
+      subRegion: '생줄리앙',
+      color: 'R',
+      vintage: '2017',
+    });
+    expect(bdx2017).toEqual(expect.objectContaining({ start: 2024, end: 2040 }));
+
+    const burgGc2019 = estimateDrinkingWindow({
+      name: 'Domaine Test Echezeaux Grand Cru',
+      country: '프랑스',
+      region: '부르고뉴',
+      subRegion: '에세죠',
+      color: 'R',
+      vintage: '2019',
+    });
+    expect(burgGc2019).toEqual(expect.objectContaining({ start: 2027, end: 2043 }));
+
+    const champNv = estimateDrinkingWindow({
+      name: 'Krug Grande Cuvee',
+      country: '프랑스',
+      region: '상파뉴',
+      color: 'SP',
+      vintage: 'NV',
+      referenceYear: 2025,
+    });
+    expect(champNv).toEqual(expect.objectContaining({ start: 2025, end: 2028 }));
+  });
+
+  it('auto-fills only missing drinking windows without overwriting manually configured wines', async () => {
+    const demoDb = createDemoDatabase();
+    demoDb.metadata.lastBackupAt = new Date().toISOString();
+    demoDb.wines[0].drinkingWindowStart = 2025;
+    demoDb.wines[0].drinkingWindowEnd = 2031;
+    for (let i = 1; i < demoDb.wines.length; i += 1) {
+      demoDb.wines[i].drinkingWindowStart = null;
+      demoDb.wines[i].drinkingWindowEnd = null;
+    }
+
+    useWineStore.setState({ db: demoDb, storageMode: 'local_test' });
+    const filled = await useWineStore.getState().autoFillMissingDrinkingWindows();
+    expect(filled).toBe(demoDb.wines.length - 1);
+
+    const dbAfter = useWineStore.getState().db!;
+    // 수동 입력 와인 보존 확인
+    expect(dbAfter.wines[0].drinkingWindowStart).toBe(2025);
+    expect(dbAfter.wines[0].drinkingWindowEnd).toBe(2031);
+    // 나머지 미입력 와인 자동 채움 확인
+    for (let i = 1; i < dbAfter.wines.length; i += 1) {
+      expect(dbAfter.wines[i].drinkingWindowStart).toBeTypeOf('number');
+      expect(dbAfter.wines[i].drinkingWindowEnd).toBeTypeOf('number');
+      expect(dbAfter.wines[i].drinkingWindowEnd!).toBeGreaterThan(
+        dbAfter.wines[i].drinkingWindowStart!,
+      );
+    }
   });
 });
 

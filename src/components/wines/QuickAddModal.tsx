@@ -7,6 +7,7 @@ import {
   type WineMaster,
 } from '@/types/schema';
 import { getTodayIsoDate, formatWineOrigin, shouldIncludeInTrackingSince } from '@/services/domain/wineHelpers';
+import { estimateDrinkingWindow } from '@/services/domain/drinkingWindowEstimator';
 import { useWineStore } from '@/store/useWineStore';
 import { BottomSheet } from '@/components/common/BottomSheet';
 import {
@@ -63,6 +64,7 @@ export function QuickAddModal() {
   const [memo, setMemo] = useState('');
   const [dwStartStr, setDwStartStr] = useState('');
   const [dwEndStr, setDwEndStr] = useState('');
+  const [dwManualOverride, setDwManualOverride] = useState(false);
   const [includeTracking, setIncludeTracking] = useState(true);
   const [trackingManualOverride, setTrackingManualOverride] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -172,8 +174,11 @@ export function QuickAddModal() {
         setSubRegion(found.subRegion ?? '');
         setBottleSizeMl(found.bottleSizeMl);
         setProducer(found.producer ?? '');
+        const hasExistingDw =
+          found.drinkingWindowStart != null || found.drinkingWindowEnd != null;
         setDwStartStr(found.drinkingWindowStart ? String(found.drinkingWindowStart) : '');
         setDwEndStr(found.drinkingWindowEnd ? String(found.drinkingWindowEnd) : '');
+        setDwManualOverride(hasExistingDw);
         return;
       }
     }
@@ -188,7 +193,38 @@ export function QuickAddModal() {
     setProducer('');
     setDwStartStr('');
     setDwEndStr('');
+    setDwManualOverride(false);
   }, [isOpen, presetWineId]);
+
+  const dwReferenceYear = /^\d{4}/.test(purchaseDate)
+    ? Number(purchaseDate.slice(0, 4))
+    : new Date().getFullYear();
+
+  const dwEstimate = useMemo(
+    () =>
+      estimateDrinkingWindow({
+        name,
+        country,
+        region,
+        subRegion,
+        color,
+        vintage,
+        referenceYear: dwReferenceYear,
+      }),
+    [name, country, region, subRegion, color, vintage, dwReferenceYear],
+  );
+
+  // 신규 입력 시 지역·등급·색상·빈티지 기반 시음적기 자동 입력 (사용자 수동 수정 전까지 자동 갱신)
+  useEffect(() => {
+    if (!isOpen || dwManualOverride) return;
+    if (dwEstimate) {
+      setDwStartStr(String(dwEstimate.start));
+      setDwEndStr(String(dwEstimate.end));
+    } else {
+      setDwStartStr('');
+      setDwEndStr('');
+    }
+  }, [isOpen, dwManualOverride, dwEstimate]);
 
   const handlePurchaseDateChange = (val: string) => {
     setPurchaseDate(val);
@@ -206,8 +242,10 @@ export function QuickAddModal() {
     setVintage(w.vintage);
     setBottleSizeMl(w.bottleSizeMl);
     setProducer(w.producer ?? '');
+    const hasExistingDw = w.drinkingWindowStart != null || w.drinkingWindowEnd != null;
     setDwStartStr(w.drinkingWindowStart ? String(w.drinkingWindowStart) : '');
     setDwEndStr(w.drinkingWindowEnd ? String(w.drinkingWindowEnd) : '');
+    setDwManualOverride(hasExistingDw);
     setShowSuggestions(false);
     // T4 보강: 자동완성 후 빈티지 오입력 방지를 위해 하이라이트 및 포커스·선택
     setVintageHintActive(true);
@@ -617,7 +655,9 @@ export function QuickAddModal() {
             onClick={() => setShowExtra((v) => !v)}
             className="flex w-full items-center justify-between px-3.5 py-2.5 text-xs font-bold text-secondary hover:text-primary"
           >
-            <span>추가 정보 (용량 · 음용 적기 · 생산자 · 외화 메모 · 기준일)</span>
+            <span>
+              추가 정보 (용량 · 음용 적기{dwStartStr && dwEndStr ? ` ${dwStartStr}~${dwEndStr}` : ''} · 생산자 · 외화)
+            </span>
             {showExtra ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
           </button>
 
@@ -683,25 +723,57 @@ export function QuickAddModal() {
                 />
               </div>
 
-              <div className="grid grid-cols-2 gap-2.5">
-                <input
-                  type="number"
-                  min={1900}
-                  max={2150}
-                  value={dwStartStr}
-                  onChange={(e) => setDwStartStr(e.target.value)}
-                  placeholder="음용 적기 시작연도 (예: 2026)"
-                  className="rounded-xl border border-subtle bg-surface px-3 py-2 text-xs tabular-nums text-primary focus:border-forest focus:outline-none"
-                />
-                <input
-                  type="number"
-                  min={1900}
-                  max={2150}
-                  value={dwEndStr}
-                  onChange={(e) => setDwEndStr(e.target.value)}
-                  placeholder="음용 적기 종료연도 (예: 2032)"
-                  className="rounded-xl border border-subtle bg-surface px-3 py-2 text-xs tabular-nums text-primary focus:border-forest focus:outline-none"
-                />
+              <div className="space-y-1.5">
+                <div className="flex flex-wrap items-center justify-between gap-1 text-[11px]">
+                  <span className="font-semibold text-secondary">
+                    음용 적기 (시작 ~ 종료연도)
+                  </span>
+                  {dwEstimate && (
+                    <span className="text-forest">
+                      {dwManualOverride ? (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setDwManualOverride(false);
+                            setDwStartStr(String(dwEstimate.start));
+                            setDwEndStr(String(dwEstimate.end));
+                          }}
+                          className="font-bold underline"
+                        >
+                          자동 추천({dwEstimate.start}~{dwEstimate.end}) 다시 적용
+                        </button>
+                      ) : (
+                        <span>✨ 자동 입력: {dwEstimate.basis}</span>
+                      )}
+                    </span>
+                  )}
+                </div>
+                <div className="grid grid-cols-2 gap-2.5">
+                  <input
+                    type="number"
+                    min={1900}
+                    max={2150}
+                    value={dwStartStr}
+                    onChange={(e) => {
+                      setDwStartStr(e.target.value);
+                      setDwManualOverride(true);
+                    }}
+                    placeholder="음용 적기 시작연도 (예: 2026)"
+                    className="rounded-xl border border-subtle bg-surface px-3 py-2 text-xs tabular-nums text-primary focus:border-forest focus:outline-none"
+                  />
+                  <input
+                    type="number"
+                    min={1900}
+                    max={2150}
+                    value={dwEndStr}
+                    onChange={(e) => {
+                      setDwEndStr(e.target.value);
+                      setDwManualOverride(true);
+                    }}
+                    placeholder="음용 적기 종료연도 (예: 2032)"
+                    className="rounded-xl border border-subtle bg-surface px-3 py-2 text-xs tabular-nums text-primary focus:border-forest focus:outline-none"
+                  />
+                </div>
               </div>
 
               <input

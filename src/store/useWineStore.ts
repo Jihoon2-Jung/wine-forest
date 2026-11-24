@@ -21,6 +21,7 @@ import {
   getTodayIsoDate,
   shouldIncludeInTrackingSince,
 } from '@/services/domain/wineHelpers';
+import { estimateDrinkingWindow } from '@/services/domain/drinkingWindowEstimator';
 import { createDemoDatabase, createEmptyDatabase } from '@/services/storage/defaultTemplates';
 import { GoogleDriveAdapter } from '@/services/storage/googleDriveAdapter';
 import { clearCachedState, loadCachedState, saveCachedState } from '@/services/storage/localCache';
@@ -277,6 +278,7 @@ interface WineStoreState {
   updateLocation: (id: string, patch: Partial<Omit<CellarLocation, 'id'>>) => Promise<void>;
   deleteLocation: (id: string) => Promise<void>;
   updateTrackingSinceDate: (newDate: string, recalculateExisting: boolean) => Promise<void>;
+  autoFillMissingDrinkingWindows: () => Promise<number>;
 
   // Phase 2-3A: Media (Label & Tasting Photos) — Blob 기반으로 Web File 및 Capacitor Camera 모두 수용
   uploadWineLabelPhoto: (wineId: string, file: Blob) => Promise<void>;
@@ -1354,6 +1356,59 @@ export const useWineStore = create<WineStoreState>((set, get) => {
           ? `누적 지출 기준일을 ${newDate}로 변경하고 전체 병을 재계산했습니다.`
           : `누적 지출 기준일을 ${newDate}로 변경했습니다.`,
       );
+    },
+
+    autoFillMissingDrinkingWindows: async () => {
+      const db = get().db;
+      if (!db) return 0;
+
+      // NV 와인의 기준 연도로 사용할 와인별 최초 구입연도 맵
+      const earliestYearByWine = new Map<string, number>();
+      for (const b of db.bottles) {
+        if (b.purchaseDate && /^\d{4}/.test(b.purchaseDate)) {
+          const yr = Number(b.purchaseDate.slice(0, 4));
+          const prev = earliestYearByWine.get(b.wineId);
+          if (prev === undefined || yr < prev) {
+            earliestYearByWine.set(b.wineId, yr);
+          }
+        }
+      }
+
+      const now = new Date().toISOString();
+      let updatedCount = 0;
+      const nextWines = db.wines.map((w) => {
+        if (w.drinkingWindowStart != null || w.drinkingWindowEnd != null) {
+          return w;
+        }
+        const est = estimateDrinkingWindow({
+          name: w.name,
+          country: w.country,
+          region: w.region,
+          subRegion: w.subRegion,
+          color: w.color,
+          vintage: w.vintage,
+          referenceYear: earliestYearByWine.get(w.id),
+        });
+        if (!est) return w;
+        updatedCount += 1;
+        return {
+          ...w,
+          drinkingWindowStart: est.start,
+          drinkingWindowEnd: est.end,
+          updatedAt: now,
+        };
+      });
+
+      if (updatedCount === 0) {
+        get().showToast('음용 적기가 비어 있는 와인이 없습니다.', 'info');
+        return 0;
+      }
+
+      await commitMutation(
+        { ...db, wines: nextWines },
+        `미입력 와인 ${updatedCount}종의 음용 적기를 지역·빈티지 기준으로 자동 채웠습니다.`,
+      );
+      return updatedCount;
     },
 
     uploadWineLabelPhoto: async (wineId, file) => {

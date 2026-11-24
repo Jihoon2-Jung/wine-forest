@@ -10,6 +10,7 @@ import {
   RefreshCw,
   RotateCcw,
   Save,
+  Sparkles,
   Trash2,
   Upload,
   UploadCloud,
@@ -38,6 +39,7 @@ export function SettingsPage() {
   const exportLocalJson = useWineStore((s) => s.exportLocalJson);
   const importJsonDatabase = useWineStore((s) => s.importJsonDatabase);
   const updateTrackingSinceDate = useWineStore((s) => s.updateTrackingSinceDate);
+  const autoFillMissingDrinkingWindows = useWineStore((s) => s.autoFillMissingDrinkingWindows);
   const disconnectAndResetLocal = useWineStore((s) => s.disconnectAndResetLocal);
   const showToast = useWineStore((s) => s.showToast);
 
@@ -59,6 +61,9 @@ export function SettingsPage() {
 
   const clientIdReady = hasGoogleClientId();
   const tokenActive = isTokenValid();
+  const missingDrinkingWindowCount = db.wines.filter(
+    (w) => w.drinkingWindowStart == null && w.drinkingWindowEnd == null,
+  ).length;
 
   const handleImportFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -304,7 +309,43 @@ export function SettingsPage() {
         />
       </section>
 
-      {/* 4. 누적 지출 기준일 설정 */}
+      {/* 4. 음용 적기 일괄 자동 채우기 (지역·빈티지 기준표) */}
+      <section className="space-y-3 rounded-2xl border border-subtle bg-surface p-5 shadow-card">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <h3 className="flex items-center gap-1.5 text-sm font-bold text-primary">
+              <Sparkles className="h-4 w-4 text-forest" />
+              <span>음용 적기(Drinking Window) 일괄 자동 채우기</span>
+            </h3>
+            <p className="mt-0.5 text-xs text-secondary tabular-nums">
+              Wine Spectator · Wine Advocate 지역·빈티지 기준표로 미입력 와인({missingDrinkingWindowCount}종)의 시작~종료 연도를 자동 채웁니다. (이미 입력된 와인은 유지)
+            </p>
+          </div>
+          <button
+            type="button"
+            disabled={missingDrinkingWindowCount === 0}
+            onClick={() => {
+              if (
+                window.confirm(
+                  `음용 적기가 비어 있는 ${missingDrinkingWindowCount}종 와인에 지역·빈티지 기준 추천 연도를 일괄 채울까요?\n(이미 직접 입력한 와인은 덮어쓰지 않습니다.)`,
+                )
+              ) {
+                void autoFillMissingDrinkingWindows();
+              }
+            }}
+            className="inline-flex items-center gap-1.5 rounded-xl bg-forest px-3.5 py-2 text-xs font-bold text-white hover:bg-forest-hover disabled:cursor-not-allowed disabled:opacity-45"
+          >
+            <Sparkles className="h-3.5 w-3.5" />
+            <span>
+              {missingDrinkingWindowCount > 0
+                ? `미입력 ${missingDrinkingWindowCount}종 자동 채우기`
+                : '모두 입력됨'}
+            </span>
+          </button>
+        </div>
+      </section>
+
+      {/* 5. 누적 지출 기준일 설정 */}
       <section className="space-y-3 rounded-2xl border border-subtle bg-surface p-5 shadow-card">
         <h3 className="flex items-center gap-1.5 text-sm font-bold text-primary">
           <CalendarRange className="h-4 w-4 text-forest" />

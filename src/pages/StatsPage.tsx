@@ -1,4 +1,4 @@
-import { Clock } from 'lucide-react';
+import { Clock, Sparkles } from 'lucide-react';
 import { useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import type { WineColor } from '@/types/schema';
@@ -22,6 +22,7 @@ export default function StatsPage() {
   const db = useWineStore((s) => s.db);
   const resetFilters = useWineStore((s) => s.resetFilters);
   const setFilters = useWineStore((s) => s.setFilters);
+  const autoFillMissingDrinkingWindows = useWineStore((s) => s.autoFillMissingDrinkingWindows);
   const navigate = useNavigate();
 
   const stats = useMemo(() => {
@@ -40,6 +41,10 @@ export default function StatsPage() {
   }, [db]);
 
   if (!db || !stats) return null;
+
+  const missingDwCount = db.wines.filter(
+    (w) => w.drinkingWindowStart == null && w.drinkingWindowEnd == null,
+  ).length;
 
   const handleDrillColor = (color: WineColor) => {
     resetFilters();
@@ -81,11 +86,31 @@ export default function StatsPage() {
             <Clock className="h-4 w-4 text-forest" />
             <h3 className="text-sm font-bold text-primary">적정 음용 시기 현황 (보유 와인)</h3>
           </div>
-          <span className="text-[11px] text-secondary tabular-nums">
-            {stats.drinkingWindow.configuredBottles > 0
-              ? `음용 적기 등록됨 ${stats.drinkingWindow.configuredBottles}병 · 카드 클릭 시 목록 이동`
-              : '와인 상세 수정 또는 입고 시 음용 적기 연도를 입력하면 자동 집계됩니다'}
-          </span>
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-[11px] text-secondary tabular-nums">
+              {stats.drinkingWindow.configuredBottles > 0
+                ? `음용 적기 등록됨 ${stats.drinkingWindow.configuredBottles}병 · 카드 클릭 시 목록 이동`
+                : '지역·빈티지 기준표로 보유 와인의 음용 적기를 자동 채울 수 있습니다'}
+            </span>
+            {missingDwCount > 0 && (
+              <button
+                type="button"
+                onClick={() => {
+                  if (
+                    window.confirm(
+                      `음용 적기가 비어 있는 ${missingDwCount}종 와인에 지역·빈티지 기준 추천 연도를 일괄 채울까요?\n(이미 입력된 와인은 유지됩니다.)`,
+                    )
+                  ) {
+                    void autoFillMissingDrinkingWindows();
+                  }
+                }}
+                className="inline-flex items-center gap-1 rounded-lg bg-forest px-2.5 py-1 text-[11px] font-bold text-white hover:bg-forest-hover"
+              >
+                <Sparkles className="h-3 w-3" />
+                <span>미입력 {missingDwCount}종 자동 채우기</span>
+              </button>
+            )}
+          </div>
         </div>
 
         <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-4">

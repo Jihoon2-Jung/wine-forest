@@ -139,5 +139,5 @@ flowchart TD
 - [ ] `npm run build` 실행 시 `dist/index.html`의 에셋 경로가 `/wine-forest/`로 유지되고 `dist/sw.js`, `dist/manifest.webmanifest`가 정상 생성되는가?
 - [ ] `BUILD_TARGET=capacitor` 미지정 상태에서 `Capacitor.isNativePlatform()`이 `false`로 평가되어 웹 브라우저가 항상 `WebGisAuthAdapter`를 타는가?
 - [ ] 웹 환경에서 `nativeBridge.ts`의 StatusBar / App / Filesystem / Share 호출이 동적/안전 가드로 스킵되거나 기존 Blob 다운로드로 폴백되는가?
-- [ ] 기존 테스트 스위트(`privacyMode.test.tsx`, `schemaValidation.test.ts`, `statsCalculator.test.ts`, `syncConflict.test.ts`, `wineStore.test.ts`, `phase2.test.tsx` — 총 6개 스위트 / 25개 테스트)가 단 1건의 회귀 없이 모두 통과하는가?
+- [ ] 기존 테스트 스위트(`privacyMode.test.tsx`, `schemaValidation.test.ts`, `statsCalculator.test.ts`, `syncConflict.test.ts`, `wineStore.test.ts`, `phase2.test.tsx` — 총 6개 스위트 / 27개 테스트)가 단 1건의 회귀 없이 모두 통과하는가?
 - [ ] `.github/workflows/deploy.yml`의 `npm run typecheck && npm run test && npm run build` CI 파이프라인이 추가 환경변수나 네이티브 도구 없이 그대로 통과하는가?
