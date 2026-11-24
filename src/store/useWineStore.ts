@@ -278,10 +278,10 @@ interface WineStoreState {
   deleteLocation: (id: string) => Promise<void>;
   updateTrackingSinceDate: (newDate: string, recalculateExisting: boolean) => Promise<void>;
 
-  // Phase 2-3A: Media (Label & Tasting Photos)
-  uploadWineLabelPhoto: (wineId: string, file: File) => Promise<void>;
+  // Phase 2-3A: Media (Label & Tasting Photos) — Blob 기반으로 Web File 및 Capacitor Camera 모두 수용
+  uploadWineLabelPhoto: (wineId: string, file: Blob) => Promise<void>;
   removeWineLabelPhoto: (wineId: string) => Promise<void>;
-  uploadTastingPhoto: (file: File) => Promise<string | null>;
+  uploadTastingPhoto: (file: Blob) => Promise<string | null>;
   deleteTastingPhotoFile: (fileId: string) => Promise<void>;
 
   // UI Actions

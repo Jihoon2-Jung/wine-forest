@@ -8,6 +8,7 @@ import {
   getDrinkingWindowStatus,
 } from '@/services/domain/wineHelpers';
 import { computeScaledDimensions } from '@/services/media/imageProcessor';
+import { pickImageFile } from '@/services/media/photoPicker';
 import { createDemoDatabase } from '@/services/storage/defaultTemplates';
 
 vi.mock('@/services/storage/localCache', () => ({
@@ -153,10 +154,30 @@ describe('Phase 2-2 — 5-Star Ratings, Structured Tasting Notes & Privacy 2-A',
   });
 });
 
-describe('Phase 2-3A — Image Scaling Helper', () => {
+describe('Phase 2-3A — Image Scaling & Unified Photo Picker', () => {
   it('scales landscape and portrait images within maxDim without upscaling small images', () => {
     expect(computeScaledDimensions(2000, 1000, 500)).toEqual({ width: 500, height: 250 });
     expect(computeScaledDimensions(1200, 2400, 1024)).toEqual({ width: 512, height: 1024 });
     expect(computeScaledDimensions(400, 300, 500)).toEqual({ width: 400, height: 300 });
+  });
+
+  it('triggers hidden image file input and resolves the picked file via pickImageFile', async () => {
+    const fakeFile = new File(['webp-bytes'], 'label.webp', { type: 'image/webp' });
+    const clickSpy = vi
+      .spyOn(HTMLInputElement.prototype, 'click')
+      .mockImplementation(function (this: HTMLInputElement) {
+        Object.defineProperty(this, 'files', {
+          value: [fakeFile],
+          configurable: true,
+        });
+        this.dispatchEvent(new Event('change'));
+      });
+
+    try {
+      const picked = await pickImageFile({ preset: 'label', source: 'camera' });
+      expect(picked).toBe(fakeFile);
+    } finally {
+      clickSpy.mockRestore();
+    }
   });
 });

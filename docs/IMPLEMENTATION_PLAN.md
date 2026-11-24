@@ -55,7 +55,7 @@
 
 - **Milestone 1~4 (웹앱 풀스택 SPA/PWA):** 완료 (`src/` 전체 + `public/` 아이콘 + Tailwind/CSS 변수)
 - **Milestone 5 (엑셀 마이그레이션):** `일회성 로컬 이관 스크립트` 실행 → `wine_db.json` (초기 이관 완료 · 3단계 산지 · 미분류 0건 · 소비일 결측 0건 · 선반 24개) 및 `migration_review.md` 생성, Zod 통과
-- **Milestone 6 (CI/CD · 테스트 · 실배포):** `.github/workflows/deploy.yml`(`build`/`deploy` 2개 Job 분리, `actions/upload-pages-artifact@v4`, `actions/deploy-pages@v4`), `README.md`, `npm run typecheck` (0 errors), `npm run test` (6 suites / 24 tests pass), `npm run build` (0 warnings, PWA `dist/sw.js` 생성), GitHub Pages 프로덕션 배포 및 PC·스마트폰 Google Drive 동기화 검증 완료
+- **Milestone 6 (CI/CD · 테스트 · 실배포):** `.github/workflows/deploy.yml`(`build`/`deploy` 2개 Job 분리, `actions/upload-pages-artifact@v4`, `actions/deploy-pages@v4`), `README.md`, `npm run typecheck` (0 errors), `npm run test` (6 suites / 25 tests pass), `npm run build` (0 warnings, PWA `dist/sw.js` 생성), GitHub Pages 프로덕션 배포 및 PC·스마트폰 Google Drive 동기화 검증 완료
 - **Phase 2 (2-1 · 2-2 · 2-3A 완료):**
   - **2-1 적정 음용 시기:** `drinkingWindowStart`/`End` 입력·편집, 4단계 상태 배지, 목록 1탭 `지금 적기` 필터, 통계 대시보드 음용 적기 드릴다운 카드
   - **2-2 별점 · 시음노트 · 동반자:** 5.0 만점 0.5단위 별점(`StarRating`), `QuickConsumeModal` 접이식 상세 시음 기록, `HistoryPage` 평점 필터·평점순 정렬, `WineDetailSheet` 평균 별점, 프라이버시 모드 2-A 정책(`tastingNote`·`companions` 유지 / `memo` 마스킹)

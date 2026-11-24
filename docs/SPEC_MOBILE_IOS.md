@@ -1,7 +1,7 @@
 # JH Wine Forest — 모바일(iOS 중심 + 공통/Android 선행) 개발 작업지시서 (`SPEC_MOBILE_IOS.md`)
 
 > **문서 안내:** 본 문서는 [MOBILE_IMPLEMENTATION_PLAN.md](./MOBILE_IMPLEMENTATION_PLAN.md)의 세부 실행 명세서입니다.
-> - **상태:** **ON HOLD — 경로 A (웹 Phase 2 완료 후 M1부터 착수)**
+> - **상태:** **READY FOR M1 — 웹 Phase 2 (2-1·2-2·2-3A) 및 단일 미디어 진입점(`photoPicker.ts`) 선반영 완료**
 > Mac 환경에서 **공통 코드(`src/`) 리팩토링, iOS 네이티브(`ios/`) 구현, Android 선행 스캐폴딩(`android/`) 작성**까지 누락 없이 구현·검증할 수 있도록 상세 지침을 제공합니다.
 > Windows PC에서의 Android Keystore 생성 및 빌드는 [GUIDE_WIN_ANDROID.md](./GUIDE_WIN_ANDROID.md)로 이어집니다.
 
@@ -492,7 +492,7 @@ class MainActivity : BridgeActivity() {
 | 마일스톤 | 선행 조건 | 작업 범위 | 자가 검증 명령 및 통과 기준 |
 | :---: | :---: | :--- | :--- |
 | **M1** | 없음 | `.gitignore`, `.gitattributes`, `package.json`, `vite.config.ts`, `capacitor.config.ts` | `npm run build` (`dist/sw.js` 생성 + `/wine-forest/`) 및 `npm run build:mobile` (`dist/sw.js` 미생성 + `./`) 모두 성공 |
-| **M2** | M1 | `googleDriveAuth.ts`, `src/services/auth/*`, `nativeBridge.ts`, `googleDriveAdapter.ts`, `useWineStore.ts`, UI(`BottomSheet`, `AppShell`, `OnboardingView`, `SettingsPage`), `tests/authAdapter.test.ts` | `npm run typecheck` (에러 0건), `npm run test` (기존 5개 스위트 + `authAdapter.test.ts` 전체 100% 통과) |
+| **M2** | M1 | `googleDriveAuth.ts`, `src/services/auth/*`, `nativeBridge.ts`, `googleDriveAdapter.ts`, `useWineStore.ts`, `photoPicker.ts`(`@capacitor/camera` 분기 연결), UI(`BottomSheet`, `AppShell`, `OnboardingView`, `SettingsPage`), `tests/authAdapter.test.ts` | `npm run typecheck` (에러 0건), `npm run test` (기존 6개 스위트 + `authAdapter.test.ts` 전체 100% 통과) |
 | **M3** | M2 | `npx cap add ios --packagemanager SPM`, `npx cap add android`, `ios/` Swift 플러그인·`Local.xcconfig.example`, `android/` Kotlin 플러그인·`MainActivity`·`build.gradle` 작성 후 Git 커밋·푸시 | `npx cap sync android` 성공, `git status`에 개인 설정/키스토어 미포함 확인 |
 | **M4** | **Xcode 설치** | Xcode 초기 세팅, `GoogleSignIn-iOS` SPM 연결, `Local.xcconfig` 작성, Google Cloud iOS Client 추가 및 프로덕션 게시 | `xcodebuild -project ios/App/App.xcodeproj -scheme App -sdk iphonesimulator build` 에러 0건 |
 | **M5** | M4 + iPhone | 무료 Personal Team으로 iPhone 실기기 USB 설치 및 실사용 E2E 검증 | ① 최초 1회 로그인 후 `wine_db.json` 로드 ② 앱 강제 종료 후 재실행 시 로그인 팝업 없이 자동 동기화 ③ JSON 공유 시트 정상 동작 ④ 다크/라이트 상태바 전환 정상 |
@@ -511,7 +511,8 @@ class MainActivity : BridgeActivity() {
 경로 A에 따라 웹 Phase 2 기능 개발이 끝난 뒤 본 지시서(M1~M5)를 착수할 때, 아래 2개 항목을 함께 반영합니다.
 
 1. **라벨 / 시음 사진 카메라 연동 (`@capacitor/camera`):**
-   * M1 패키지 설치 시 `@capacitor/camera`를 함께 설치하고, 웹 Phase 2에서 분리해 둔 미디어 입력 모듈(`src/services/media/`)에 네이티브 촬영/앨범 선택 및 1차 리사이즈(`width: 1000, quality: 80` → `500px WebP` 변환) 분기를 연결합니다.
+   * M1 패키지 설치 시 `@capacitor/camera`를 함께 설치합니다.
+   * **단일 연동 지점:** 모든 UI(`WineDetailSheet`, `QuickConsumeModal`, `HistoryCard`)는 이미 [photoPicker.ts](../src/services/media/photoPicker.ts)의 `pickImageFile(options)`로 단일화되어 있으며, 스토어(`uploadWineLabelPhoto` / `uploadTastingPhoto`)도 `Blob`을 직접 수용합니다. **UI 파일은 수정하지 말고 `src/services/media/photoPicker.ts` 상단의 `NEXT AGENT HANDOFF` 주석대로 `Capacitor.isNativePlatform()` 분기만 추가**하십시오. (반환된 `Blob`은 `imageProcessor.ts`에서 자동 500px/1024px WebP 압축 후 `StorageAdapter.uploadPhoto()`로 저장됨)
    * **`ios/App/App/Info.plist` 필수 권한 키 추가** *(미등록 시 iOS 실기기 카메라/앨범 호출 시 크래시)*:
      * `NSCameraUsageDescription`: `"와인 라벨 및 시음 사진을 촬영해 셀러에 저장하기 위해 카메라 접근 권한이 필요합니다."`
      * `NSPhotoLibraryUsageDescription`: `"앨범에서 와인 라벨 및 시음 사진을 선택해 등록하기 위해 사진 라이브러리 접근 권한이 필요합니다."`

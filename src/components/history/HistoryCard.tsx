@@ -1,7 +1,8 @@
 import { Camera, Check, Gift, Pencil, RotateCcw, Users, Wine, X } from 'lucide-react';
-import { useRef, useState } from 'react';
+import { useState } from 'react';
 import type { BottleInstance, CellarLocation, TastingRecord, WineMaster } from '@/types/schema';
 import { formatWineOrigin } from '@/services/domain/wineHelpers';
+import { pickImageFile } from '@/services/media/photoPicker';
 import { useWineStore } from '@/store/useWineStore';
 import { PhotoLightbox, TastingPhotoThumb } from '@/components/common/PhotoLightbox';
 import { MemoText, PriceText } from '@/components/common/PriceText';
@@ -21,7 +22,6 @@ export function HistoryCard({ tasting, bottle, wine, locations }: HistoryCardPro
   const uploadTastingPhoto = useWineStore((s) => s.uploadTastingPhoto);
   const deleteTastingPhotoFile = useWineStore((s) => s.deleteTastingPhotoFile);
 
-  const photoInputRef = useRef<HTMLInputElement>(null);
   const [lightboxFileId, setLightboxFileId] = useState<string | null>(null);
   const [uploadingPhoto, setUploadingPhoto] = useState(false);
   const [restoring, setRestoring] = useState(false);
@@ -259,7 +259,20 @@ export function HistoryCard({ tasting, bottle, wine, locations }: HistoryCardPro
                 <button
                   type="button"
                   disabled={uploadingPhoto}
-                  onClick={() => photoInputRef.current?.click()}
+                  onClick={async () => {
+                    if (draftPhotoFileIds.length >= 3) return;
+                    const blob = await pickImageFile({ preset: 'tasting' });
+                    if (!blob) return;
+                    setUploadingPhoto(true);
+                    try {
+                      const uploadedId = await uploadTastingPhoto(blob);
+                      if (uploadedId) {
+                        setDraftPhotoFileIds((prev) => [...prev, uploadedId]);
+                      }
+                    } finally {
+                      setUploadingPhoto(false);
+                    }
+                  }}
                   className="inline-flex items-center gap-1 rounded-md border border-subtle bg-elevated px-2 py-1 text-[11px] font-bold text-primary hover:border-forest hover:text-forest disabled:opacity-50"
                 >
                   <Camera className="h-3 w-3" />
@@ -282,26 +295,6 @@ export function HistoryCard({ tasting, bottle, wine, locations }: HistoryCardPro
                 ))}
               </div>
             )}
-            <input
-              ref={photoInputRef}
-              type="file"
-              accept="image/*"
-              className="hidden"
-              onChange={async (e) => {
-                const file = e.target.files?.[0];
-                e.target.value = '';
-                if (!file || draftPhotoFileIds.length >= 3) return;
-                setUploadingPhoto(true);
-                try {
-                  const uploadedId = await uploadTastingPhoto(file);
-                  if (uploadedId) {
-                    setDraftPhotoFileIds((prev) => [...prev, uploadedId]);
-                  }
-                } finally {
-                  setUploadingPhoto(false);
-                }
-              }}
-            />
           </div>
           <div className="flex justify-end gap-1.5">
             <button

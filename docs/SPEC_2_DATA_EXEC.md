@@ -266,6 +266,7 @@ wine-forest/
 │   │   ├── domain/wineHelpers.ts   # 4중 키 매칭, 3단계 산지 포맷, 음용 적기 판정, FIFO/빈티지 정렬
 │   │   ├── media/
 │   │   │   ├── imageProcessor.ts   # 브라우저 Canvas 리사이징 & WebP/JPEG 압축
+│   │   │   ├── photoPicker.ts      # 단일 이미지 선택/촬영 진입점 (추후 @capacitor/camera 연결 포인트)
 │   │   │   └── photoLoader.ts      # IndexedDB/Drive 사진 캐시 해석기 + usePhotoUrl 훅
 │   │   ├── storage/
 │   │   │   ├── types.ts            # StorageAdapter 인터페이스 (DB + 백업 + 사진 CRUD)
@@ -364,7 +365,7 @@ Antigravity(Gemini Neon)는 아래 **6개 마일스톤**을 순서대로 완료�
 
 ## 10. 최종 완료 기준 (Definition of Done — 검증 완료)
 
-- [x] `npm run test` 모든 단위 테스트(스키마, 230218 통계·3단계 산지, 충돌 감지·주 1회 백업, 프라이버시 마스킹, 스토어 도메인 변이, Phase 2 음용 적기·별점/시음노트·이미지 리사이징) 100% 통과 (6 suites / 24 tests)
+- [x] `npm run test` 모든 단위 테스트(스키마, 230218 통계·3단계 산지, 충돌 감지·주 1회 백업, 프라이버시 마스킹, 스토어 도메인 변이, Phase 2 음용 적기·별점/시음노트·이미지 리사이징·단일 사진 피커) 100% 통과 (6 suites / 25 tests)
 - [x] `npm run build` TypeScript/Vite 에러 및 경고 없이 완료, PWA 서비스워커(`dist/sw.js`) 정상 생성
 - [x] 모바일(`390×844`)과 데스크톱(`1440×900`) 양쪽에서 라이트/다크 모드 모두 대비·가독성 결함 없음 (화이트 연노랑 `#F3EED4`/`#EFEAD0` 다크 텍스트 대비 포함)
 - [x] 프라이버시 토글(`👁️`) ON 시 앱 내 모든 페이지·모달·외화 메모(`<FxNoteText />`)·비고/메모 원문(`<MemoText />`)·차트(가격대 분포 오버레이 포함)에서 금액 정보 100% 마스킹 확인

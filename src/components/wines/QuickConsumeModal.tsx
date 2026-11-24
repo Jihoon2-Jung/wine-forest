@@ -1,7 +1,8 @@
 import { Camera, ChevronDown, ChevronUp, Gift, Wine } from 'lucide-react';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import type { BottleInstance, WineMaster } from '@/types/schema';
 import { getTodayIsoDate, sortBottlesFifo } from '@/services/domain/wineHelpers';
+import { pickImageFile } from '@/services/media/photoPicker';
 import { useWineStore } from '@/store/useWineStore';
 import { BottomSheet } from '@/components/common/BottomSheet';
 import { TastingPhotoThumb } from '@/components/common/PhotoLightbox';
@@ -30,7 +31,6 @@ export function QuickConsumeModal({
   const uploadTastingPhoto = useWineStore((s) => s.uploadTastingPhoto);
   const deleteTastingPhotoFile = useWineStore((s) => s.deleteTastingPhotoFile);
 
-  const photoInputRef = useRef<HTMLInputElement>(null);
   const fifoBottles = useMemo(() => sortBottlesFifo(bottles), [bottles]);
   const [selectedBottleId, setSelectedBottleId] = useState<string>('');
   const [eventType, setEventType] = useState<'CONSUMED' | 'GIFTED'>('CONSUMED');
@@ -271,7 +271,20 @@ export function QuickConsumeModal({
                     <button
                       type="button"
                       disabled={uploadingPhoto}
-                      onClick={() => photoInputRef.current?.click()}
+                      onClick={async () => {
+                        if (photoFileIds.length >= 3) return;
+                        const blob = await pickImageFile({ preset: 'tasting' });
+                        if (!blob) return;
+                        setUploadingPhoto(true);
+                        try {
+                          const uploadedId = await uploadTastingPhoto(blob);
+                          if (uploadedId) {
+                            setPhotoFileIds((prev) => [...prev, uploadedId]);
+                          }
+                        } finally {
+                          setUploadingPhoto(false);
+                        }
+                      }}
                       className="inline-flex items-center gap-1 rounded-lg border border-subtle bg-surface px-2.5 py-1 text-[11px] font-bold text-primary hover:border-forest hover:text-forest disabled:opacity-50"
                     >
                       <Camera className="h-3.5 w-3.5" />
@@ -293,26 +306,6 @@ export function QuickConsumeModal({
                     ))}
                   </div>
                 )}
-                <input
-                  ref={photoInputRef}
-                  type="file"
-                  accept="image/*"
-                  className="hidden"
-                  onChange={async (e) => {
-                    const file = e.target.files?.[0];
-                    e.target.value = '';
-                    if (!file || photoFileIds.length >= 3) return;
-                    setUploadingPhoto(true);
-                    try {
-                      const uploadedId = await uploadTastingPhoto(file);
-                      if (uploadedId) {
-                        setPhotoFileIds((prev) => [...prev, uploadedId]);
-                      }
-                    } finally {
-                      setUploadingPhoto(false);
-                    }
-                  }}
-                />
               </div>
             </div>
           )}

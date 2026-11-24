@@ -1,5 +1,5 @@
 import { Camera, ChevronDown, ChevronUp, Pencil, Plus, RotateCcw, Trash2, Users } from 'lucide-react';
-import { useMemo, useRef, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { WINE_COLORS, type WineColor, type WineMaster } from '@/types/schema';
 import {
   buildWineMasterKey,
@@ -10,6 +10,7 @@ import {
   getDrinkingWindowStatus,
   sortBottlesFifo,
 } from '@/services/domain/wineHelpers';
+import { pickImageFile } from '@/services/media/photoPicker';
 import { useWineStore } from '@/store/useWineStore';
 import { BottomSheet } from '@/components/common/BottomSheet';
 import { PhotoLightbox, TastingPhotoThumb } from '@/components/common/PhotoLightbox';
@@ -34,7 +35,6 @@ export function WineDetailSheet({ wineId, onClose }: WineDetailSheetProps) {
   const uploadWineLabelPhoto = useWineStore((s) => s.uploadWineLabelPhoto);
   const removeWineLabelPhoto = useWineStore((s) => s.removeWineLabelPhoto);
 
-  const labelInputRef = useRef<HTMLInputElement>(null);
   const [uploadingLabel, setUploadingLabel] = useState(false);
   const [lightboxFileId, setLightboxFileId] = useState<string | null>(null);
   const [consumeBottleId, setConsumeBottleId] = useState<string | null>(null);
@@ -146,6 +146,18 @@ export function WineDetailSheet({ wineId, onClose }: WineDetailSheetProps) {
       ? Math.round((ratedValues.reduce((acc, v) => acc + v, 0) / ratedValues.length) * 10) / 10
       : null;
 
+  const handlePickLabelPhoto = async () => {
+    if (uploadingLabel) return;
+    const blob = await pickImageFile({ preset: 'label' });
+    if (!blob) return;
+    setUploadingLabel(true);
+    try {
+      await uploadWineLabelPhoto(wine.id, blob);
+    } finally {
+      setUploadingLabel(false);
+    }
+  };
+
   return (
     <>
       <BottomSheet
@@ -167,14 +179,14 @@ export function WineDetailSheet({ wineId, onClose }: WineDetailSheetProps) {
                 onClick={
                   wine.labelImageFileId
                     ? () => setLightboxFileId(wine.labelImageFileId ?? null)
-                    : () => labelInputRef.current?.click()
+                    : () => void handlePickLabelPhoto()
                 }
               />
               <div className="flex items-center gap-1">
                 <button
                   type="button"
                   disabled={uploadingLabel}
-                  onClick={() => labelInputRef.current?.click()}
+                  onClick={() => void handlePickLabelPhoto()}
                   className="inline-flex items-center gap-1 rounded-lg border border-subtle bg-surface px-2 py-1 text-[10px] font-bold text-secondary hover:border-forest hover:text-forest disabled:opacity-50"
                   title="라벨 사진 촬영 또는 선택"
                 >
@@ -198,23 +210,6 @@ export function WineDetailSheet({ wineId, onClose }: WineDetailSheetProps) {
                   </button>
                 )}
               </div>
-              <input
-                ref={labelInputRef}
-                type="file"
-                accept="image/*"
-                className="hidden"
-                onChange={async (e) => {
-                  const file = e.target.files?.[0];
-                  e.target.value = '';
-                  if (!file) return;
-                  setUploadingLabel(true);
-                  try {
-                    await uploadWineLabelPhoto(wine.id, file);
-                  } finally {
-                    setUploadingLabel(false);
-                  }
-                }}
-              />
             </div>
             <div className="min-w-0 flex-1 space-y-2">
               <div className="flex flex-wrap items-center gap-1.5">

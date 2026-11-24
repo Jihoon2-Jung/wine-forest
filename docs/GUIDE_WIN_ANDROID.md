@@ -1,7 +1,7 @@
 # JH Wine Forest — Windows PC Android 빌드 · 서명 · 배포 실전 가이드 (`GUIDE_WIN_ANDROID.md`)
 
 > **문서 목적:** 본 가이드는 **단일 Git 저장소(`wine-forest`) + PC 이원화 빌드 전략(Mac = iOS / Windows = Android)**에 따라, **Windows PC에서 Android 앱을 빌드·서명·실기기 설치**하기 위한 단독 실행형 매뉴얼입니다.
-> - **상태:** **ON HOLD — 경로 A (웹 Phase 2 완료 및 Mac M1~M3 완료 후 Windows에서 진행)**
+> - **상태:** **READY AFTER MAC M1~M3 — 웹 Phase 2 완료, Mac M1~M3 완료 후 Windows에서 진행**
 >
 > **전제 조건:** Mac에서 이미 공통 웹/앱 코드(`src/`), Capacitor 설정(`capacitor.config.ts`), Android 프로젝트(`android/`) 및 `GoogleDriveAuthPlugin.kt` 작성이 완료되어 `main` 브랜치에 푸시된 상태에서 진행합니다. (전체 설계는 [MOBILE_IMPLEMENTATION_PLAN.md](./MOBILE_IMPLEMENTATION_PLAN.md) 참고)
 

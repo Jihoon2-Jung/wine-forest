@@ -1,7 +1,7 @@
 # JH Wine Forest — 모바일 앱(iOS / Android) 전환 마스터 구현 계획 (Mobile v1.0)
 
 > **연관 문서 (모바일 시리즈):**
-> - **상태:** **ON HOLD — 경로 A 확정 (웹 Phase 2 완료 후 모바일 M1부터 착수)**
+> - **상태:** **READY FOR M1 — 웹 Phase 2 (2-1·2-2·2-3A) 및 모바일 호환 5원칙 선반영 완료 (사용자 지시 시 모바일 M1 즉시 착수 가능)**
 > - **마스터 구현 계획:** `MOBILE_IMPLEMENTATION_PLAN.md` (본 문서)
 > - **Mac · iOS(+공통 코드 & Android 선행) 개발 작업지시서:** [SPEC_MOBILE_IOS.md](./SPEC_MOBILE_IOS.md)
 > - **Windows · Android 빌드/배포 실전 가이드:** [GUIDE_WIN_ANDROID.md](./GUIDE_WIN_ANDROID.md)
@@ -90,15 +90,17 @@ flowchart TD
 
 ---
 
-## 4. Phase 2 웹 개발 시 모바일 호환 5원칙 (재작업 방지 가이드)
+## 4. Phase 2 웹 개발 시 모바일 호환 5원칙 (선반영 완료 · 다음 작업자 인수인계)
 
-경로 A에 따라 모바일 전환 전 웹에서 Phase 2(라벨·시음 사진, 구조화된 시음노트·평점, 음용적기 관리)를 먼저 구현할 때, 아래 5원칙을 지키면 추후 Capacitor 전환 시 코드 재작업을 최소화할 수 있습니다.
+경로 A에 따라 웹 Phase 2(라벨·시음 사진, 구조화된 시음노트·5점 별점, 음용적기 관리)가 **모바일 호환 5원칙을 100% 준수한 상태로 구현 완료**되었습니다. 모바일 M1~M3 착수 작업자는 아래 단일 지점만 연결하면 UI 컴포넌트 수정 없이 네이티브 연동을 끝낼 수 있습니다.
 
-1. **사진 조회/업로드 추상화:** `JH_Wine_Forest/photos/` 파일 업로드·조회·삭제는 `StorageAdapter` 메서드로 추상화하고, `<WineThumbnail />` 및 시음 사진 뷰어는 Drive API 원격 URL(`<img src="https://www.googleapis.com/drive/...">`)을 직접 꽂지 말고 **`fetchDrive` Blob 다운로드 + IndexedDB 캐시(Object URL)** 방식으로 렌더링합니다. (`drive.file` Authorization 헤더 필수 + WKWebView/Android WebView 인증·CORS 문제 원천 차단)
-2. **이미지 선택 · 리사이징 서비스 분리:** `500px WebP` 리사이징 및 파일 선택 로직을 UI 컴포넌트 내부에 직접 쓰지 말고 `src/services/media/` 등 별도 모듈로 분리합니다. 추후 모바일 전환 시 단일 지점에만 `@capacitor/camera` 입력 분기를 연결하면 됩니다.
-3. **IndexedDB 스키마 업그레이드 안전성:** [localCache.ts](../src/services/storage/localCache.ts)에 이미지 캐시용 `photoCache` 스토어를 추가할 때 `DB_VERSION`을 `2`로 올리고, `upgrade(db)` 블록에서 기존 `appState`·`localBackups` 스토어는 건드리지 않고 `!db.objectStoreNames.contains('photoCache')` 가드로 추가해 기존 캐시 데이터 손실을 방지합니다.
-4. **시음노트 `<textarea>` 모바일 레이아웃:** 긴 시음노트 입력란은 [BottomSheet.tsx](../src/components/common/BottomSheet.tsx) 내부 스크롤 영역 안에 배치해 모바일 가상 키보드 올라옴으로 입력칸이 가려지는 현상을 최소화합니다.
-5. **음용적기 판단 로직 순수 함수 분리:** 적정 음용 중/임박/지남 판별 및 대상 와인 계산을 순수 함수(예: `src/services/domain/` 또는 `src/services/analytics/`)로 작성해 웹에서는 인앱 배지·통계 필터로 쓰고, 추후 모바일에서 무료 Personal Team과 호환되는 `@capacitor/local-notifications` 스케줄러에 그대로 연결할 수 있게 합니다.
+1. **사진 조회/업로드 추상화 (완료 ✅):** `JH_Wine_Forest/photos/` 업로드·조회·삭제는 [types.ts](../src/services/storage/types.ts) `StorageAdapter`(`uploadPhoto`/`downloadPhoto`/`deletePhoto`)로 추상화되었고, [photoLoader.ts](../src/services/media/photoLoader.ts)가 `fetchDrive` Blob 다운로드 + IndexedDB 캐시(Object URL)로 렌더링합니다. *(주의: M2에서 `googleDriveAdapter.ts`를 비동기 `ensureAccessToken()`으로 전환할 때 `photoLoader.ts`의 `photoDriveClient`도 동일 어댑터를 타므로 자동 적용됩니다.)*
+2. **이미지 선택 · 리사이징 단일 진입점 분리 (완료 ✅):**
+   - **파일 선택/촬영 단일 훅:** [photoPicker.ts](../src/services/media/photoPicker.ts)의 `pickImageFile(options)`로 `WineDetailSheet`, `QuickConsumeModal`, `HistoryCard` 3곳이 모두 단일화되어 있습니다. **모바일 M2 착수 시 UI 파일은 수정하지 말고 `photoPicker.ts` 상단에 `@capacitor/camera` 분기만 추가**하십시오(상세 예시 코드 주석 포함).
+   - **압축/리사이징:** [imageProcessor.ts](../src/services/media/imageProcessor.ts)가 `Blob`(웹 `File` 및 Capacitor `Camera.getPhoto` Blob 모두 수용)을 받아 라벨 `500px` / 시음 `1024px` WebP로 자동 압축합니다.
+3. **IndexedDB 스키마 업그레이드 안전성 (완료 ✅):** [localCache.ts](../src/services/storage/localCache.ts)는 이미 `DB_VERSION = 2`로 업그레이드되어 `!db.objectStoreNames.contains('photoCache')` 가드로 기존 `appState`·`localBackups`를 보존합니다.
+4. **시음노트 `<textarea>` 모바일 레이아웃 (완료 ✅):** [QuickConsumeModal.tsx](../src/components/wines/QuickConsumeModal.tsx)의 상세 시음노트 `<textarea>`는 [BottomSheet.tsx](../src/components/common/BottomSheet.tsx) 내부 스크롤 영역 안에 배치되어 있습니다.
+5. **음용적기 판단 로직 순수 함수 분리 (완료 ✅):** [wineHelpers.ts](../src/services/domain/wineHelpers.ts)의 `getDrinkingWindowStatus()`와 [statsCalculator.ts](../src/services/analytics/statsCalculator.ts)의 `calculateDrinkingWindowSummary()`가 순수 함수로 분리되어 있어 추후 `@capacitor/local-notifications` 스케줄러에 그대로 연결할 수 있습니다.
 
 ---
 
@@ -137,5 +139,5 @@ flowchart TD
 - [ ] `npm run build` 실행 시 `dist/index.html`의 에셋 경로가 `/wine-forest/`로 유지되고 `dist/sw.js`, `dist/manifest.webmanifest`가 정상 생성되는가?
 - [ ] `BUILD_TARGET=capacitor` 미지정 상태에서 `Capacitor.isNativePlatform()`이 `false`로 평가되어 웹 브라우저가 항상 `WebGisAuthAdapter`를 타는가?
 - [ ] 웹 환경에서 `nativeBridge.ts`의 StatusBar / App / Filesystem / Share 호출이 동적/안전 가드로 스킵되거나 기존 Blob 다운로드로 폴백되는가?
-- [ ] 기존 테스트 스위트(`privacyMode.test.tsx`, `schemaValidation.test.ts`, `statsCalculator.test.ts`, `syncConflict.test.ts`, `wineStore.test.ts`)가 단 1건의 회귀 없이 모두 통과하는가?
+- [ ] 기존 테스트 스위트(`privacyMode.test.tsx`, `schemaValidation.test.ts`, `statsCalculator.test.ts`, `syncConflict.test.ts`, `wineStore.test.ts`, `phase2.test.tsx` — 총 6개 스위트 / 25개 테스트)가 단 1건의 회귀 없이 모두 통과하는가?
 - [ ] `.github/workflows/deploy.yml`의 `npm run typecheck && npm run test && npm run build` CI 파이프라인이 추가 환경변수나 네이티브 도구 없이 그대로 통과하는가?
