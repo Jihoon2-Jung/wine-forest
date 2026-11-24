@@ -31,6 +31,11 @@ describe('WineDatabase Zod Schema Validation', () => {
     const brokenPrice = structuredClone(demoDb);
     brokenPrice.bottles[0].purchasePrice = -5000;
     expect(safeParseWineDatabase(brokenPrice).success).toBe(false);
+
+    const invertedWindow = structuredClone(demoDb);
+    invertedWindow.wines[0].drinkingWindowStart = 2035;
+    invertedWindow.wines[0].drinkingWindowEnd = 2025;
+    expect(safeParseWineDatabase(invertedWindow).success).toBe(false);
   });
 
   it('rejects dangling foreign keys for wineId, IN_STOCK locationId, and tasting bottleId', () => {

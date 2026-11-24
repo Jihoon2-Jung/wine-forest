@@ -17,7 +17,7 @@ import {
   UploadCloud,
 } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
-import { parseApprovedLabelsBundle } from '@/types/validation';
+import { parseApprovedLabelsBundle, type ApprovedLabelsBundle } from '@/types/validation';
 import { buildWineLabelGroupKey } from '@/services/domain/wineHelpers';
 import { hasGoogleClientId, isTokenValid } from '@/services/auth/googleAuth';
 import { useWineStore } from '@/store/useWineStore';
@@ -52,6 +52,10 @@ export function SettingsPage() {
   const labelsBundleInputRef = useRef<HTMLInputElement>(null);
   const [trackingDate, setTrackingDate] = useState(db?.metadata.trackingSinceDate ?? '2023-02-18');
   const [recalcAll, setRecalcAll] = useState(false);
+  const [pendingLabelImport, setPendingLabelImport] = useState<{
+    bundle: ApprovedLabelsBundle;
+    overlapCount: number;
+  } | null>(null);
 
   useEffect(() => {
     if (db) {
@@ -119,20 +123,25 @@ export function SettingsPage() {
         }
       }
 
-      let overwriteExisting = false;
       if (existingOverlapCount > 0) {
-        overwriteExisting = window.confirm(
-          `업로드한 파일에 이미 라벨이 등록된 와인 ${existingOverlapCount}건이 포함되어 있습니다.\n\n` +
-            `[확인] 이미 등록된 라벨도 새 이미지로 덮어쓰기 (기존 파일 자동 삭제)\n` +
-            `[취소] 라벨이 없는 와인만 새로 적용 (기존 ${existingOverlapCount}건 건너뛰기)`,
-        );
+        setPendingLabelImport({ bundle, overlapCount: existingOverlapCount });
+        return;
       }
 
-      await importApprovedLabelsBundle(bundle, { overwriteExisting });
+      await importApprovedLabelsBundle(bundle, { overwriteExisting: false });
     } catch (err) {
       const msg = err instanceof Error ? err.message : '유효하지 않은 승인 라벨 번들 형식입니다.';
       showToast(`라벨 일괄 적용 실패: ${msg}`, 'error');
     }
+  };
+
+  const handleConfirmLabelImport = async (choice: 'skip_existing' | 'overwrite_all' | 'cancel') => {
+    const pending = pendingLabelImport;
+    setPendingLabelImport(null);
+    if (!pending || choice === 'cancel') return;
+    await importApprovedLabelsBundle(pending.bundle, {
+      overwriteExisting: choice === 'overwrite_all',
+    });
   };
 
   const handleRestore = async (fileId: string, name: string) => {
@@ -470,6 +479,54 @@ export function SettingsPage() {
           <span>초기화</span>
         </button>
       </section>
+
+      {/* 승인 라벨 일괄 적용 시 기존 라벨 중복 처리 3버튼 확인 모달 */}
+      <BottomSheet
+        open={Boolean(pendingLabelImport)}
+        onClose={() => void handleConfirmLabelImport('cancel')}
+        title="이미 라벨이 등록된 와인이 포함되어 있습니다"
+        subtitle={
+          pendingLabelImport
+            ? `총 ${pendingLabelImport.bundle.items.length}건 중 ${pendingLabelImport.overlapCount}건은 이미 라벨이 등록되어 있습니다.`
+            : undefined
+        }
+      >
+        <div className="space-y-2.5">
+          <button
+            type="button"
+            onClick={() => void handleConfirmLabelImport('skip_existing')}
+            className="flex w-full items-center gap-3 rounded-xl bg-forest px-4 py-3 text-left text-white hover:bg-forest-hover"
+          >
+            <Images className="h-5 w-5 shrink-0" />
+            <div>
+              <div className="text-sm font-bold">미등록 와인만 새로 적용 (권장)</div>
+              <div className="text-xs opacity-90">
+                기존 라벨 {pendingLabelImport?.overlapCount ?? 0}건은 유지하고 라벨이 없는 와인만 업로드합니다.
+              </div>
+            </div>
+          </button>
+          <button
+            type="button"
+            onClick={() => void handleConfirmLabelImport('overwrite_all')}
+            className="flex w-full items-center gap-3 rounded-xl border border-burgundy/40 bg-burgundy/10 px-4 py-3 text-left text-primary hover:bg-burgundy/15"
+          >
+            <UploadCloud className="h-5 w-5 shrink-0 text-burgundy" />
+            <div>
+              <div className="text-sm font-bold text-burgundy">기존 라벨도 새 이미지로 덮어쓰기</div>
+              <div className="text-xs text-secondary">
+                기존 라벨 파일을 새 이미지로 교체하며, 더 이상 쓰이지 않는 이전 파일은 자동 삭제됩니다.
+              </div>
+            </div>
+          </button>
+          <button
+            type="button"
+            onClick={() => void handleConfirmLabelImport('cancel')}
+            className="w-full rounded-xl border border-subtle bg-elevated py-2.5 text-xs font-bold text-secondary hover:text-primary"
+          >
+            업로드 취소
+          </button>
+        </div>
+      </BottomSheet>
 
       {/* T5 보강: 로컬 → Google Drive 전환 시 기존 Drive 파일 존재 확인 모달 */}
       <BottomSheet

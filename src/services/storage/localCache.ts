@@ -148,3 +148,12 @@ export async function deleteCachedPhoto(fileId: string): Promise<void> {
     // ignore cache deletion errors
   }
 }
+
+export async function clearAllCachedPhotos(): Promise<void> {
+  try {
+    const db = await getDb();
+    await db.clear('photoCache');
+  } catch {
+    // ignore cache clear errors
+  }
+}

@@ -34,6 +34,7 @@ vi.mock('@/services/storage/localCache', () => ({
   getCachedPhoto: vi.fn(async () => null),
   putCachedPhoto: vi.fn(async () => undefined),
   deleteCachedPhoto: vi.fn(async () => undefined),
+  clearAllCachedPhotos: vi.fn(async () => undefined),
 }));
 
 import { useWineStore } from '@/store/useWineStore';

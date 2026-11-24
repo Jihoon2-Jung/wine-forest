@@ -1,7 +1,12 @@
 import { useEffect, useState } from 'react';
 import { isTokenValid } from '@/services/auth/googleAuth';
 import { GoogleDriveAdapter } from '@/services/storage/googleDriveAdapter';
-import { deleteCachedPhoto, getCachedPhoto, putCachedPhoto } from '@/services/storage/localCache';
+import {
+  clearAllCachedPhotos,
+  deleteCachedPhoto,
+  getCachedPhoto,
+  putCachedPhoto,
+} from '@/services/storage/localCache';
 import type { StorageMode } from '@/services/storage/types';
 import { useWineStore } from '@/store/useWineStore';
 
@@ -15,7 +20,7 @@ const inFlightLoads = new Map<string, Promise<string | null>>();
 export async function registerUploadedPhotoBlob(fileId: string, blob: Blob): Promise<string> {
   await putCachedPhoto(fileId, blob);
   const existing = memoryObjectUrls.get(fileId);
-  if (existing) {
+  if (existing && typeof URL.revokeObjectURL === 'function') {
     URL.revokeObjectURL(existing);
   }
   const url = URL.createObjectURL(blob);
@@ -26,10 +31,23 @@ export async function registerUploadedPhotoBlob(fileId: string, blob: Blob): Pro
 export async function evictPhotoFromCache(fileId: string): Promise<void> {
   const existing = memoryObjectUrls.get(fileId);
   if (existing) {
-    URL.revokeObjectURL(existing);
+    if (typeof URL.revokeObjectURL === 'function') {
+      URL.revokeObjectURL(existing);
+    }
     memoryObjectUrls.delete(fileId);
   }
   await deleteCachedPhoto(fileId);
+}
+
+export async function clearAllPhotoCaches(): Promise<void> {
+  if (typeof URL.revokeObjectURL === 'function') {
+    for (const url of memoryObjectUrls.values()) {
+      URL.revokeObjectURL(url);
+    }
+  }
+  memoryObjectUrls.clear();
+  inFlightLoads.clear();
+  await clearAllCachedPhotos();
 }
 
 /**

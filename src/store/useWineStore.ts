@@ -29,7 +29,11 @@ import { clearCachedState, loadCachedState, saveCachedState } from '@/services/s
 import { LocalOnlyAdapter } from '@/services/storage/localOnlyAdapter';
 import { syncEngine } from '@/services/storage/syncEngine';
 import { compressImageFile, dataUrlToBlob } from '@/services/media/imageProcessor';
-import { evictPhotoFromCache, registerUploadedPhotoBlob } from '@/services/media/photoLoader';
+import {
+  clearAllPhotoCaches,
+  evictPhotoFromCache,
+  registerUploadedPhotoBlob,
+} from '@/services/media/photoLoader';
 import {
   AuthRequiredError,
   ConflictError,
@@ -326,6 +330,35 @@ export const useWineStore = create<WineStoreState>((set, get) => {
           : state.hasUnsyncedChanges,
       storageMode: override?.storageMode !== undefined ? override.storageMode : state.storageMode,
     });
+  };
+
+  const cleanupUnreferencedPhotoFiles = (candidateIds: Iterable<string>, nextDb: WineDatabase) => {
+    const uniqueCandidates = new Set<string>();
+    for (const id of candidateIds) {
+      if (id) uniqueCandidates.add(id);
+    }
+    if (uniqueCandidates.size === 0) return;
+
+    const referenced = new Set<string>();
+    for (const w of nextDb.wines) {
+      if (w.labelImageFileId) referenced.add(w.labelImageFileId);
+    }
+    for (const t of nextDb.tastings) {
+      for (const pid of t.photoFileIds ?? []) {
+        if (pid) referenced.add(pid);
+      }
+    }
+
+    const mode = get().storageMode;
+    const adapter = getAdapter(mode);
+    for (const fileId of uniqueCandidates) {
+      if (!referenced.has(fileId)) {
+        if (mode === 'local_test' || isTokenValid()) {
+          void adapter.deletePhoto(fileId).catch(() => undefined);
+        }
+        void evictPhotoFromCache(fileId);
+      }
+    }
   };
 
   const commitMutation = async (nextDb: WineDatabase, successToast?: string) => {
@@ -734,6 +767,7 @@ export const useWineStore = create<WineStoreState>((set, get) => {
       clearAccessToken();
       googleDriveAdapter.resetWorkspaceCache();
       await clearCachedState();
+      await clearAllPhotoCaches();
       set({
         db: null,
         fileId: null,
@@ -1104,18 +1138,47 @@ export const useWineStore = create<WineStoreState>((set, get) => {
       if (!db) return;
       const now = new Date().toISOString();
 
-      // ⑤ 보강: 사용자가 확인한 경우 중복 4중 키 마스터와 병합 (bottles.wineId 이전 + 중복 마스터 제거)
+      // ⑤ 보강: 사용자가 확인한 경우 중복 4중 키 마스터와 병합 (bottles.wineId 이전 + 메타데이터 계승 + 중복 마스터 제거)
       if (mergeTargetWineId && mergeTargetWineId !== wineId) {
-        const targetExists = db.wines.some((w) => w.id === mergeTargetWineId);
-        if (targetExists) {
+        const sourceMaster = db.wines.find((w) => w.id === wineId);
+        const targetMaster = db.wines.find((w) => w.id === mergeTargetWineId);
+        if (sourceMaster && targetMaster) {
           const nextBottles = db.bottles.map((b) =>
             b.wineId === wineId ? { ...b, wineId: mergeTargetWineId, updatedAt: now } : b,
           );
-          const nextWines = db.wines.filter((w) => w.id !== wineId);
-          await commitMutation(
-            { ...db, wines: nextWines, bottles: nextBottles },
-            '기존 동일 와인과 하나로 병합했습니다.',
-          );
+          const inheritedLabel = targetMaster.labelImageFileId ?? sourceMaster.labelImageFileId ?? null;
+          const inheritedDwStart =
+            targetMaster.drinkingWindowStart ??
+            patch.drinkingWindowStart ??
+            sourceMaster.drinkingWindowStart ??
+            null;
+          const inheritedDwEnd =
+            targetMaster.drinkingWindowEnd ??
+            patch.drinkingWindowEnd ??
+            sourceMaster.drinkingWindowEnd ??
+            null;
+          const inheritedProducer =
+            targetMaster.producer || patch.producer?.trim() || sourceMaster.producer || undefined;
+
+          const nextWines = db.wines
+            .filter((w) => w.id !== wineId)
+            .map((w) =>
+              w.id === mergeTargetWineId
+                ? {
+                    ...w,
+                    producer: inheritedProducer,
+                    labelImageFileId: inheritedLabel,
+                    drinkingWindowStart: inheritedDwStart,
+                    drinkingWindowEnd: inheritedDwEnd,
+                    updatedAt: now,
+                  }
+                : w,
+            );
+          const nextDb: WineDatabase = { ...db, wines: nextWines, bottles: nextBottles };
+          await commitMutation(nextDb, '기존 동일 와인과 하나로 병합했습니다.');
+          if (sourceMaster.labelImageFileId && sourceMaster.labelImageFileId !== inheritedLabel) {
+            cleanupUnreferencedPhotoFiles([sourceMaster.labelImageFileId], nextDb);
+          }
           return;
         }
       }
@@ -1164,6 +1227,7 @@ export const useWineStore = create<WineStoreState>((set, get) => {
       const db = get().db;
       if (!db) return;
       const target = db.bottles.find((b) => b.id === bottleId);
+      const removedTastings = db.tastings.filter((t) => t.bottleId === bottleId);
       const nextBottles = db.bottles.filter((b) => b.id !== bottleId);
       const nextTastings = db.tastings.filter((t) => t.bottleId !== bottleId);
 
@@ -1171,15 +1235,26 @@ export const useWineStore = create<WineStoreState>((set, get) => {
       const hasRemainingForWine = target
         ? nextBottles.some((b) => b.wineId === target.wineId)
         : true;
-      const nextWines =
-        target && !hasRemainingForWine
-          ? db.wines.filter((w) => w.id !== target.wineId)
-          : db.wines;
+      const removedMaster =
+        target && !hasRemainingForWine ? db.wines.find((w) => w.id === target.wineId) : undefined;
+      const nextWines = removedMaster ? db.wines.filter((w) => w.id !== removedMaster.id) : db.wines;
 
-      await commitMutation(
-        { ...db, wines: nextWines, bottles: nextBottles, tastings: nextTastings },
-        '병 기록을 삭제했습니다.',
-      );
+      const nextDb: WineDatabase = {
+        ...db,
+        wines: nextWines,
+        bottles: nextBottles,
+        tastings: nextTastings,
+      };
+      await commitMutation(nextDb, '병 기록을 삭제했습니다.');
+
+      const candidatePhotoIds: string[] = [];
+      for (const t of removedTastings) {
+        candidatePhotoIds.push(...(t.photoFileIds ?? []));
+      }
+      if (removedMaster?.labelImageFileId) {
+        candidatePhotoIds.push(removedMaster.labelImageFileId);
+      }
+      cleanupUnreferencedPhotoFiles(candidatePhotoIds, nextDb);
     },
 
     moveBottle: async (bottleId, targetLocationId) => {
@@ -1246,6 +1321,7 @@ export const useWineStore = create<WineStoreState>((set, get) => {
       const db = get().db;
       if (!db) return;
       const now = new Date().toISOString();
+      const removedTastings = db.tastings.filter((t) => t.bottleId === bottleId);
       const nextBottles = db.bottles.map((b) =>
         b.id === bottleId
           ? {
@@ -1257,14 +1333,15 @@ export const useWineStore = create<WineStoreState>((set, get) => {
           : b,
       );
       const nextTastings = db.tastings.filter((t) => t.bottleId !== bottleId);
-      await commitMutation(
-        {
-          ...db,
-          bottles: nextBottles,
-          tastings: nextTastings,
-        },
-        '보유 상태로 복원했습니다.',
-      );
+      const nextDb: WineDatabase = {
+        ...db,
+        bottles: nextBottles,
+        tastings: nextTastings,
+      };
+      await commitMutation(nextDb, '보유 상태로 복원했습니다.');
+
+      const candidatePhotoIds = removedTastings.flatMap((t) => t.photoFileIds ?? []);
+      cleanupUnreferencedPhotoFiles(candidatePhotoIds, nextDb);
     },
 
     updateTastingRecord: async (tastingId, patch) => {
@@ -1580,9 +1657,11 @@ export const useWineStore = create<WineStoreState>((set, get) => {
 
       const adapter = getAdapter(state.storageMode);
       const uploadedByWineId = new Map<string, string>();
+      const propagatedByWineId = new Map<string, string>();
       const oldFileIdsToDelete = new Set<string>();
       let skipped = 0;
       let failed = 0;
+      let abortReason: 'auth' | 'rate_limit' | null = null;
 
       set({ bulkLabelProgress: { current: 0, total: bundle.items.length } });
       try {
@@ -1609,14 +1688,27 @@ export const useWineStore = create<WineStoreState>((set, get) => {
             }
           }
 
-          const targetsToUpdate = overwriteExisting
-            ? [...matchedWines.values()]
-            : [...matchedWines.values()].filter((w) => !w.labelImageFileId);
-
-          if (targetsToUpdate.length === 0) {
+          if (matchedWines.size === 0) {
             skipped += 1;
             continue;
           }
+
+          const matchedList = [...matchedWines.values()];
+          const existingGroupLabelId = matchedList.find((w) => Boolean(w.labelImageFileId))?.labelImageFileId;
+
+          // 부분 라벨 그룹 정합성 보강: overwriteExisting=false인데 그룹 내 기존 라벨이 이미 있으면
+          // 새 중복 파일을 올리지 않고 기존 라벨을 비어있는 형제 빈티지에 공유(동기화)하여 1라벨 원칙 유지
+          if (!overwriteExisting && existingGroupLabelId) {
+            for (const w of matchedList) {
+              if (!w.labelImageFileId) {
+                propagatedByWineId.set(w.id, existingGroupLabelId);
+              }
+            }
+            skipped += 1;
+            continue;
+          }
+
+          const targetsToUpdate = matchedList;
 
           try {
             const { blob, extension } = dataUrlToBlob(item.dataUrl);
@@ -1629,34 +1721,55 @@ export const useWineStore = create<WineStoreState>((set, get) => {
               }
               uploadedByWineId.set(targetWine.id, fileId);
             }
-          } catch {
+          } catch (err) {
+            if (err instanceof AuthRequiredError) {
+              abortReason = 'auth';
+              failed += bundle.items.length - idx;
+              set({ syncStatus: 'auth_required', syncError: err.message });
+              break;
+            }
+            const errMsg = err instanceof Error ? err.message : '';
+            if (/\b429\b|rate\s*limit|too many requests/i.test(errMsg)) {
+              abortReason = 'rate_limit';
+              failed += bundle.items.length - idx;
+              break;
+            }
             failed += 1;
           }
         }
 
         const applied = uploadedByWineId.size;
-        if (applied > 0) {
+        const totalUpdatedWines = applied + propagatedByWineId.size;
+        if (totalUpdatedWines > 0) {
           const now = new Date().toISOString();
           const latestDb = get().db ?? db;
           const nextWines = latestDb.wines.map((w) => {
-            const nextFileId = uploadedByWineId.get(w.id);
+            const nextFileId = uploadedByWineId.get(w.id) ?? propagatedByWineId.get(w.id);
             return nextFileId ? { ...w, labelImageFileId: nextFileId, updatedAt: now } : w;
           });
+          const nextDb: WineDatabase = { ...latestDb, wines: nextWines };
           const summaryMsg =
-            `승인된 라벨을 ${applied}개 와인(전체 빈티지 포함)에 일괄 적용했습니다.` +
-            (skipped > 0 ? ` (기존/미일치 ${skipped}건 건너뜀)` : '') +
-            (failed > 0 ? ` (실패 ${failed}건)` : '');
-          await commitMutation({ ...latestDb, wines: nextWines }, summaryMsg);
-
-          const stillReferenced = new Set(
-            nextWines.map((w) => w.labelImageFileId).filter((id): id is string => Boolean(id)),
+            abortReason === 'auth'
+              ? `인증 만료로 중단되었습니다. 먼저 완료된 ${applied}개 와인은 로컬에 반영했으니 [구글 재인증] 후 다시 진행해 주세요.`
+              : abortReason === 'rate_limit'
+                ? `Google Drive 요청 제한(429)으로 중단되었습니다. 먼저 완료된 ${applied}개 와인은 저장했으니 잠시 후 다시 진행해 주세요.`
+                : applied > 0
+                  ? `승인된 라벨을 ${applied}개 와인(전체 빈티지 포함)에 일괄 적용했습니다.` +
+                    (skipped > 0 ? ` (기존/미일치 ${skipped}건 건너뜀)` : '') +
+                    (failed > 0 ? ` (실패 ${failed}건)` : '')
+                  : `기존 그룹 라벨을 미등록 빈티지 ${propagatedByWineId.size}건에 공유 반영했습니다. (신규 업로드 없음)`;
+          await commitMutation(nextDb, summaryMsg);
+          cleanupUnreferencedPhotoFiles(oldFileIdsToDelete, nextDb);
+        } else if (abortReason === 'auth') {
+          get().showToast(
+            '업로드 중 구글 인증이 만료되어 중단했습니다. 상단 [구글 재인증] 후 다시 시도해 주세요.',
+            'warning',
           );
-          for (const oldId of oldFileIdsToDelete) {
-            if (!stillReferenced.has(oldId)) {
-              void adapter.deletePhoto(oldId).catch(() => undefined);
-              void evictPhotoFromCache(oldId);
-            }
-          }
+        } else if (abortReason === 'rate_limit') {
+          get().showToast(
+            'Google Drive 요청 한도(429)에 도달해 업로드를 중단했습니다. 잠시 후 다시 시도해 주세요.',
+            'warning',
+          );
         } else {
           get().showToast(
             `새로 적용된 라벨이 없습니다. (기존/미일치 ${skipped}건 건너뜀${failed > 0 ? ` · 실패 ${failed}건` : ''})`,

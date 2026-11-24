@@ -12,6 +12,9 @@ import { computeScaledDimensions, dataUrlToBlob } from '@/services/media/imagePr
 import { pickImageFile } from '@/services/media/photoPicker';
 import { usePhotoUrl } from '@/services/media/photoLoader';
 import { GoogleDriveAdapter } from '@/services/storage/googleDriveAdapter';
+import { LocalOnlyAdapter } from '@/services/storage/localOnlyAdapter';
+import { AuthRequiredError } from '@/services/storage/types';
+import * as localCache from '@/services/storage/localCache';
 import * as googleAuth from '@/services/auth/googleAuth';
 import { createDemoDatabase } from '@/services/storage/defaultTemplates';
 
@@ -25,10 +28,13 @@ vi.mock('@/services/storage/localCache', () => ({
   getCachedPhoto: vi.fn(async () => null),
   putCachedPhoto: vi.fn(async () => undefined),
   deleteCachedPhoto: vi.fn(async () => undefined),
+  clearAllCachedPhotos: vi.fn(async () => undefined),
 }));
 
 import { useWineStore } from '@/store/useWineStore';
 import { HistoryCard } from '@/components/history/HistoryCard';
+import { QuickConsumeModal } from '@/components/wines/QuickConsumeModal';
+import { StarRatingBadge } from '@/components/common/StarRating';
 
 describe('Phase 2-1 — Drinking Window Logic & Stats', () => {
   it('classifies drinking window status accurately across boundary years', () => {
@@ -621,5 +627,172 @@ describe('Code Review Regression Fixes — Estimator, HistoryCard Edit, & Reauth
         useWineStore.setState({ storageMode: 'local_test', googleConnected: false });
       });
     }
+  });
+});
+
+describe('Medium Code Review Fixes — Orphans, Modal Preservation, Bulk Labels & Rating Display', () => {
+  it('clears photoCache on disconnect, inherits metadata on master merge, and cleans up unreferenced photos on delete/restore', async () => {
+    const clearPhotosSpy = vi.mocked(localCache.clearAllCachedPhotos);
+    clearPhotosSpy.mockClear();
+    const deletePhotoSpy = vi
+      .spyOn(LocalOnlyAdapter.prototype, 'deletePhoto')
+      .mockResolvedValue(undefined);
+
+    try {
+      // 1) updateWineMaster 병합 시 원본의 labelImageFileId & drinkingWindow 계승
+      const db = createDemoDatabase();
+      db.metadata.lastBackupAt = new Date().toISOString();
+      const sourceWine = db.wines[0];
+      const targetWine = db.wines[1];
+      sourceWine.labelImageFileId = 'shared_label_from_source';
+      sourceWine.drinkingWindowStart = 2026;
+      sourceWine.drinkingWindowEnd = 2034;
+      targetWine.labelImageFileId = null;
+      targetWine.drinkingWindowStart = null;
+      targetWine.drinkingWindowEnd = null;
+      useWineStore.setState({ db, storageMode: 'local_test' });
+
+      await useWineStore.getState().updateWineMaster(sourceWine.id, {}, targetWine.id);
+      const mergedTarget = useWineStore.getState().db!.wines.find((w) => w.id === targetWine.id)!;
+      expect(mergedTarget.labelImageFileId).toBe('shared_label_from_source');
+      expect(mergedTarget.drinkingWindowStart).toBe(2026);
+      expect(mergedTarget.drinkingWindowEnd).toBe(2034);
+
+      // 2) restoreBottleToStock 시 삭제되는 tasting의 photoFileIds 정리
+      const consumedBottle = useWineStore.getState().db!.bottles.find((b) => b.status === 'CONSUMED')!;
+      const tasting = useWineStore.getState().db!.tastings.find((t) => t.bottleId === consumedBottle.id)!;
+      tasting.photoFileIds = ['orphan_tasting_photo_restore'];
+      deletePhotoSpy.mockClear();
+
+      await useWineStore.getState().restoreBottleToStock(consumedBottle.id, null);
+      expect(deletePhotoSpy).toHaveBeenCalledWith('orphan_tasting_photo_restore');
+
+      // 3) deleteBottle 시 고아 마스터 라벨 파일 정리
+      const singleBottleWine = useWineStore.getState().db!.wines[0];
+      const bottlesOfWine = useWineStore
+        .getState()
+        .db!.bottles.filter((b) => b.wineId === singleBottleWine.id);
+      singleBottleWine.labelImageFileId = 'orphan_label_on_delete';
+      deletePhotoSpy.mockClear();
+      for (const b of bottlesOfWine) {
+        await useWineStore.getState().deleteBottle(b.id);
+      }
+      expect(deletePhotoSpy).toHaveBeenCalledWith('orphan_label_on_delete');
+
+      // 4) disconnectAndResetLocal 시 IndexedDB photoCache도 함께 초기화
+      await useWineStore.getState().disconnectAndResetLocal();
+      expect(clearPhotosSpy).toHaveBeenCalled();
+    } finally {
+      deletePhotoSpy.mockRestore();
+    }
+  });
+
+  it('preserves user tasting input in QuickConsumeModal when bottles array reference changes while open', () => {
+    const db = createDemoDatabase();
+    useWineStore.setState({ db, storageMode: 'local_test' });
+    const wine = db.wines[0];
+    const bottlesV1 = db.bottles.filter((b) => b.wineId === wine.id && b.status === 'IN_STOCK');
+
+    const { rerender } = render(
+      <QuickConsumeModal open wine={wine} bottles={bottlesV1} onClose={() => undefined} />,
+    );
+
+    const occasionInput = screen.getByLabelText('모임 / 장소') as HTMLInputElement;
+    fireEvent.change(occasionInput, { target: { value: '결혼기념일 디너' } });
+    expect(occasionInput.value).toBe('결혼기념일 디너');
+
+    // 동기화 등으로 새로운 배열 참조가 전달되어도 입력 중인 폼이 초기화되지 않아야 함
+    const bottlesV2 = bottlesV1.map((b) => ({ ...b }));
+    rerender(<QuickConsumeModal open wine={wine} bottles={bottlesV2} onClose={() => undefined} />);
+    expect((screen.getByLabelText('모임 / 장소') as HTMLInputElement).value).toBe('결혼기념일 디너');
+  });
+
+  it('keeps 1-label consistency on partial groups (overwrite=false) and aborts immediately on 401 AuthRequiredError', async () => {
+    const sampleDataUrl = 'data:image/webp;base64,UklGRh4AAABXRUJQVlA4TBEAAAAvAAAAAAfQ//73v/+BiOh/AAA=';
+    const origCreate = URL.createObjectURL;
+    const origRevoke = URL.revokeObjectURL;
+    URL.createObjectURL = vi.fn(() => 'blob:mock-partial');
+    URL.revokeObjectURL = vi.fn();
+
+    const localUploadSpy = vi.spyOn(LocalOnlyAdapter.prototype, 'uploadPhoto');
+    const driveUploadSpy = vi.spyOn(GoogleDriveAdapter.prototype, 'uploadPhoto');
+    const tokenSpy = vi.spyOn(googleAuth, 'isTokenValid').mockReturnValue(true);
+
+    try {
+      // 1) 부분 라벨 그룹(2019에 기존 라벨 A, 2020은 null): overwriteExisting=false 시 중복 업로드 없이 라벨 A 공유
+      const db = createDemoDatabase();
+      db.metadata.lastBackupAt = new Date().toISOString();
+      const baseWine = db.wines[0];
+      baseWine.labelImageFileId = 'existing_label_A';
+      const siblingWine: WineMaster = {
+        ...baseWine,
+        id: 'wine-partial-sibling',
+        vintage: '2023',
+        labelImageFileId: null,
+      };
+      db.wines.push(siblingWine);
+      useWineStore.setState({ db, storageMode: 'local_test' });
+      localUploadSpy.mockClear();
+
+      const partialRes = await useWineStore.getState().importApprovedLabelsBundle(
+        {
+          schemaVersion: 1,
+          items: [
+            {
+              wineId: baseWine.id,
+              wineIds: [baseWine.id, siblingWine.id],
+              wineName: baseWine.name,
+              color: baseWine.color,
+              dataUrl: sampleDataUrl,
+            },
+          ],
+        },
+        { overwriteExisting: false },
+      );
+      expect(partialRes).toEqual({ applied: 0, skipped: 1, failed: 0 });
+      expect(localUploadSpy).not.toHaveBeenCalled();
+      expect(
+        useWineStore.getState().db!.wines.find((w) => w.id === siblingWine.id)!.labelImageFileId,
+      ).toBe('existing_label_A');
+
+      // 2) 대량 업로드 중 401 AuthRequiredError 발생 시 남은 항목 즉시 중단 + auth_required 전환
+      const driveDb = createDemoDatabase();
+      driveDb.wines[0].labelImageFileId = null;
+      driveDb.wines[1].labelImageFileId = null;
+      driveDb.wines[2].labelImageFileId = null;
+      useWineStore.setState({ db: driveDb, storageMode: 'google_drive', syncStatus: 'synced' });
+
+      driveUploadSpy.mockReset();
+      driveUploadSpy.mockRejectedValueOnce(new AuthRequiredError('토큰 만료'));
+
+      const authRes = await useWineStore.getState().importApprovedLabelsBundle({
+        schemaVersion: 1,
+        items: [
+          { wineId: driveDb.wines[0].id, dataUrl: sampleDataUrl },
+          { wineId: driveDb.wines[1].id, dataUrl: sampleDataUrl },
+          { wineId: driveDb.wines[2].id, dataUrl: sampleDataUrl },
+        ],
+      });
+
+      // 첫 번째 401에서 즉시 중단되어 uploadPhoto는 1회만 호출되고 남은 3건 모두 실패 처리
+      expect(driveUploadSpy).toHaveBeenCalledTimes(1);
+      expect(authRes).toEqual({ applied: 0, skipped: 0, failed: 3 });
+      expect(useWineStore.getState().syncStatus).toBe('auth_required');
+    } finally {
+      localUploadSpy.mockRestore();
+      driveUploadSpy.mockRestore();
+      tokenSpy.mockRestore();
+      URL.createObjectURL = origCreate;
+      URL.revokeObjectURL = origRevoke;
+      useWineStore.setState({ storageMode: 'local_test', syncStatus: 'synced' });
+    }
+  });
+
+  it('displays 5-point scale as decimal stars and legacy 100-point imported ratings cleanly with 점 suffix', () => {
+    const { rerender } = render(<StarRatingBadge rating={4.5} />);
+    expect(screen.getByText('4.5')).toBeInTheDocument();
+
+    rerender(<StarRatingBadge rating={92} />);
+    expect(screen.getByText('92점')).toBeInTheDocument();
   });
 });

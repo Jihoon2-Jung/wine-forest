@@ -58,6 +58,7 @@ export function WineDetailSheet({ wineId, onClose }: WineDetailSheetProps) {
   const [draftSizeMl, setDraftSizeMl] = useState(750);
   const [draftDwStart, setDraftDwStart] = useState('');
   const [draftDwEnd, setDraftDwEnd] = useState('');
+  const [masterError, setMasterError] = useState<string | null>(null);
 
   const locationMap = useMemo(
     () => new Map(db?.locations.map((l) => [l.id, l.displayName]) ?? []),
@@ -91,14 +92,27 @@ export function WineDetailSheet({ wineId, onClose }: WineDetailSheetProps) {
     setDraftSizeMl(wine.bottleSizeMl);
     setDraftDwStart(wine.drinkingWindowStart ? String(wine.drinkingWindowStart) : '');
     setDraftDwEnd(wine.drinkingWindowEnd ? String(wine.drinkingWindowEnd) : '');
+    setMasterError(null);
     setEditingMaster(true);
   };
 
   const saveEditMaster = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!draftName.trim() || !/^(\d{4}|NV)$/i.test(draftVintage.trim())) return;
+    setMasterError(null);
+    if (!draftName.trim()) {
+      setMasterError('와인명을 입력해 주세요.');
+      return;
+    }
+    if (!/^(\d{4}|NV)$/i.test(draftVintage.trim())) {
+      setMasterError('빈티지는 4자리 연도 또는 NV로 입력해 주세요.');
+      return;
+    }
     const parsedStart = /^\d{4}$/.test(draftDwStart.trim()) ? Number(draftDwStart.trim()) : null;
     const parsedEnd = /^\d{4}$/.test(draftDwEnd.trim()) ? Number(draftDwEnd.trim()) : null;
+    if (parsedStart !== null && parsedEnd !== null && parsedStart > parsedEnd) {
+      setMasterError('음용 적기 시작 연도는 종료 연도보다 클 수 없습니다.');
+      return;
+    }
     const nextPatch = {
       name: draftName.trim(),
       producer: draftProducer.trim() || undefined,
@@ -382,6 +396,11 @@ export function WineDetailSheet({ wineId, onClose }: WineDetailSheetProps) {
                   />
                 </div>
               </div>
+              {masterError && (
+                <p className="rounded-lg border border-[var(--status-danger)]/35 bg-[var(--status-danger)]/10 px-2.5 py-1.5 text-[11px] font-semibold text-[var(--status-danger)]">
+                  {masterError}
+                </p>
+              )}
               <div className="flex justify-end gap-2">
                 <button
                   type="button"

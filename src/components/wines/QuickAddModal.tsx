@@ -283,6 +283,10 @@ export function QuickAddModal() {
     const numericPrice = Number(priceStr.replace(/[^0-9]/g, '')) || 0;
     const parsedDwStart = /^\d{4}$/.test(dwStartStr.trim()) ? Number(dwStartStr.trim()) : null;
     const parsedDwEnd = /^\d{4}$/.test(dwEndStr.trim()) ? Number(dwEndStr.trim()) : null;
+    if (parsedDwStart !== null && parsedDwEnd !== null && parsedDwStart > parsedDwEnd) {
+      setErrorMsg('음용 적기 시작 연도는 종료 연도보다 클 수 없습니다.');
+      return;
+    }
     setSubmitting(true);
     try {
       await addBottles({

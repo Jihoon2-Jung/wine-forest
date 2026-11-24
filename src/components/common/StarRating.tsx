@@ -8,13 +8,18 @@ interface StarRatingBadgeProps {
 
 export function StarRatingBadge({ rating, count, size = 'xs' }: StarRatingBadgeProps) {
   if (rating === null || rating === undefined) return null;
-  const formatted = Number.isInteger(rating) ? `${rating}.0` : rating.toFixed(1);
+  const isLegacyHundredScale = rating > 5;
+  const formatted = isLegacyHundredScale
+    ? `${Math.round(rating)}점`
+    : Number.isInteger(rating)
+      ? `${rating}.0`
+      : rating.toFixed(1);
   return (
     <span
       className={`inline-flex items-center gap-0.5 rounded-full border border-gold/35 bg-gold/12 font-bold tabular-nums text-gold ${
         size === 'sm' ? 'px-2 py-0.5 text-xs' : 'px-1.5 py-0.5 text-[11px]'
       }`}
-      aria-label={`평점 ${formatted}점`}
+      aria-label={`평점 ${isLegacyHundredScale ? formatted : `${formatted}점`}`}
     >
       <Star className={size === 'sm' ? 'h-3.5 w-3.5 fill-current' : 'h-3 w-3 fill-current'} />
       <span>{formatted}</span>
@@ -78,7 +83,11 @@ export function StarRatingInput({ value, onChange }: StarRatingInputProps) {
       </div>
 
       <span className="min-w-[4.2rem] text-xs font-bold tabular-nums text-primary">
-        {value !== null ? `${value.toFixed(1)} / 5.0` : '미평가'}
+        {value !== null
+          ? value > 5
+            ? `${Math.round(value)}점 (100점제)`
+            : `${value.toFixed(1)} / 5.0`
+          : '미평가'}
       </span>
 
       {value !== null && (

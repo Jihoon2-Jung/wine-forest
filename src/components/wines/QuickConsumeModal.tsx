@@ -1,5 +1,5 @@
 import { Camera, ChevronDown, ChevronUp, Gift, Wine } from 'lucide-react';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { BottleInstance, WineMaster } from '@/types/schema';
 import { getTodayIsoDate, sortBottlesFifo } from '@/services/domain/wineHelpers';
 import { pickImageFile } from '@/services/media/photoPicker';
@@ -45,9 +45,15 @@ export function QuickConsumeModal({
   const [uploadingPhoto, setUploadingPhoto] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
+  // 작성 중 동기화 등으로 db/bottles 참조가 바뀌어도 입력 폼이 초기화되지 않도록
+  // 최신 fifoBottles는 ref로 읽고, 모달 오픈/대상 와인·병 전환 시에만 초기화
+  const latestFifoRef = useRef(fifoBottles);
+  latestFifoRef.current = fifoBottles;
+  const wineId = wine?.id ?? null;
+
   useEffect(() => {
     if (!open) return;
-    setSelectedBottleId(initialBottleId ?? fifoBottles[0]?.id ?? '');
+    setSelectedBottleId(initialBottleId ?? latestFifoRef.current[0]?.id ?? '');
     setEventType('CONSUMED');
     setEventDate(getTodayIsoDate());
     setOccasion('');
@@ -57,7 +63,15 @@ export function QuickConsumeModal({
     setCompanions('');
     setTastingNote('');
     setPhotoFileIds([]);
-  }, [open, initialBottleId, fifoBottles]);
+  }, [open, wineId, initialBottleId]);
+
+  // 모달이 열린 상태에서 외부 동기화로 현재 선택된 병만 사라진 경우, 입력 내용은 유지하고 병 ID만 보정
+  useEffect(() => {
+    if (!open || fifoBottles.length === 0) return;
+    if (selectedBottleId && !fifoBottles.some((b) => b.id === selectedBottleId)) {
+      setSelectedBottleId(fifoBottles[0].id);
+    }
+  }, [open, fifoBottles, selectedBottleId]);
 
   const locationMap = useMemo(
     () => new Map(db?.locations.map((l) => [l.id, l.displayName]) ?? []),

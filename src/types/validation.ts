@@ -7,22 +7,33 @@ const vintageRegex = /^(\d{4}|NV)$/;
 export const wineColorSchema = z.enum(['R', 'W', 'SP', 'SW', 'RO']);
 export const bottleStatusSchema = z.enum(['IN_STOCK', 'CONSUMED', 'GIFTED']);
 
-export const wineMasterSchema = z.object({
-  id: z.string().min(1),
-  name: z.string().min(1, '와인명은 필수입니다'),
-  producer: z.string().optional(),
-  country: z.string().min(1),
-  region: z.string().min(1),
-  subRegion: z.string().optional(),
-  color: wineColorSchema,
-  vintage: z.string().regex(vintageRegex, '빈티지는 4자리 연도 또는 NV여야 합니다'),
-  bottleSizeMl: z.number().int().positive(),
-  labelImageFileId: z.string().nullable().optional(),
-  drinkingWindowStart: z.number().int().nullable().optional(),
-  drinkingWindowEnd: z.number().int().nullable().optional(),
-  createdAt: z.string().min(1),
-  updatedAt: z.string().min(1),
-});
+export const wineMasterSchema = z
+  .object({
+    id: z.string().min(1),
+    name: z.string().min(1, '와인명은 필수입니다'),
+    producer: z.string().optional(),
+    country: z.string().min(1),
+    region: z.string().min(1),
+    subRegion: z.string().optional(),
+    color: wineColorSchema,
+    vintage: z.string().regex(vintageRegex, '빈티지는 4자리 연도 또는 NV여야 합니다'),
+    bottleSizeMl: z.number().int().positive(),
+    labelImageFileId: z.string().nullable().optional(),
+    drinkingWindowStart: z.number().int().nullable().optional(),
+    drinkingWindowEnd: z.number().int().nullable().optional(),
+    createdAt: z.string().min(1),
+    updatedAt: z.string().min(1),
+  })
+  .refine(
+    (w) =>
+      w.drinkingWindowStart == null ||
+      w.drinkingWindowEnd == null ||
+      w.drinkingWindowStart <= w.drinkingWindowEnd,
+    {
+      message: '음용 적기 시작 연도는 종료 연도보다 클 수 없습니다',
+      path: ['drinkingWindowEnd'],
+    },
+  );
 
 export const cellarLocationSchema = z.object({
   id: z.string().min(1),
