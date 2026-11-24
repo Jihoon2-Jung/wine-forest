@@ -132,3 +132,58 @@ export function formatWineOrigin(wine: Pick<WineMaster, 'country' | 'region' | '
   }
   return parts.join(' · ');
 }
+
+/**
+ * Phase 2-1: 적정 음용 시기(Drinking Window) 상태 판정 순수 함수
+ */
+export type DrinkingWindowStatus = 'unset' | 'too_young' | 'ready' | 'closing_soon' | 'past_peak';
+
+export function getDrinkingWindowStatus(
+  wine: Pick<WineMaster, 'drinkingWindowStart' | 'drinkingWindowEnd'>,
+  currentYear: number = new Date().getFullYear(),
+): DrinkingWindowStatus {
+  const start = wine.drinkingWindowStart ?? null;
+  const end = wine.drinkingWindowEnd ?? null;
+  if (start === null && end === null) return 'unset';
+  if (end !== null && currentYear > end) return 'past_peak';
+  if (start !== null && currentYear < start) return 'too_young';
+  if (end !== null && end - currentYear <= 1) return 'closing_soon';
+  return 'ready';
+}
+
+export function formatDrinkingWindowRange(
+  wine: Pick<WineMaster, 'drinkingWindowStart' | 'drinkingWindowEnd'>,
+): string | null {
+  const start = wine.drinkingWindowStart ?? null;
+  const end = wine.drinkingWindowEnd ?? null;
+  if (start === null && end === null) return null;
+  if (start !== null && end !== null) return `${start}~${end}`;
+  if (start !== null) return `${start}~`;
+  return `~${end}`;
+}
+
+export const DRINKING_WINDOW_BADGE_META: Record<
+  Exclude<DrinkingWindowStatus, 'unset'>,
+  { label: string; shortLabel: string; className: string }
+> = {
+  ready: {
+    label: '지금 적기',
+    shortLabel: '적기',
+    className: 'bg-[var(--status-ok)]/15 text-[var(--status-ok)] border-[var(--status-ok)]/30',
+  },
+  closing_soon: {
+    label: '마감 임박',
+    shortLabel: '마감임박',
+    className: 'bg-[var(--status-warn)]/15 text-[var(--status-warn)] border-[var(--status-warn)]/35',
+  },
+  past_peak: {
+    label: '적기 경과',
+    shortLabel: '경과',
+    className: 'bg-[var(--status-danger)]/12 text-[var(--status-danger)] border-[var(--status-danger)]/30',
+  },
+  too_young: {
+    label: '숙성 중',
+    shortLabel: '숙성중',
+    className: 'bg-elevated text-secondary border-subtle',
+  },
+};

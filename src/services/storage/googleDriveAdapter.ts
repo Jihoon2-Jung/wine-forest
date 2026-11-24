@@ -323,4 +323,58 @@ export class GoogleDriveAdapter implements StorageAdapter {
     const raw = (await res.json()) as unknown;
     return parseWineDatabase(raw);
   }
+
+  async uploadPhoto(blob: Blob, fileName: string): Promise<{ fileId: string }> {
+    const { photoFolderId } = await this.ensureWorkspace();
+    const mimeType = blob.type || 'image/webp';
+    const boundary = `jh_wine_photo_${Date.now()}`;
+    const metadata = {
+      name: fileName,
+      mimeType,
+      parents: [photoFolderId],
+      appProperties: { [APP_PROP_KEY]: APP_PROP_VAL, jhKind: 'photo' },
+    };
+
+    const body = new Blob(
+      [
+        `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n`,
+        JSON.stringify(metadata),
+        `\r\n--${boundary}\r\nContent-Type: ${mimeType}\r\n\r\n`,
+        blob,
+        `\r\n--${boundary}--`,
+      ],
+      { type: `multipart/related; boundary=${boundary}` },
+    );
+
+    const res = await this.fetchDrive(
+      `${DRIVE_UPLOAD_BASE}/files?uploadType=multipart&fields=id`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': `multipart/related; boundary=${boundary}` },
+        body,
+      },
+    );
+    const created = (await res.json()) as { id: string };
+    return { fileId: created.id };
+  }
+
+  async downloadPhoto(fileId: string): Promise<Blob> {
+    const res = await this.fetchDrive(`${DRIVE_API_BASE}/files/${fileId}?alt=media`);
+    return res.blob();
+  }
+
+  async deletePhoto(fileId: string): Promise<void> {
+    const token = this.requireToken();
+    const res = await fetch(`${DRIVE_API_BASE}/files/${fileId}`, {
+      method: 'DELETE',
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (res.status === 401) {
+      throw new AuthRequiredError('구글 인증이 만료되었습니다. 1클릭 재인증을 진행해 주세요.');
+    }
+    if (!res.ok && res.status !== 404) {
+      const detail = await res.text().catch(() => '');
+      throw new Error(`Google Drive 사진 삭제 오류 (${res.status}): ${detail || res.statusText}`);
+    }
+  }
 }

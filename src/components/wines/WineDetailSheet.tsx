@@ -1,15 +1,20 @@
-import { ChevronDown, ChevronUp, Pencil, Plus, RotateCcw } from 'lucide-react';
-import { useMemo, useState } from 'react';
+import { Camera, ChevronDown, ChevronUp, Pencil, Plus, RotateCcw, Trash2, Users } from 'lucide-react';
+import { useMemo, useRef, useState } from 'react';
 import { WINE_COLORS, type WineColor, type WineMaster } from '@/types/schema';
 import {
   buildWineMasterKey,
+  DRINKING_WINDOW_BADGE_META,
   formatBottleSizeBadge,
+  formatDrinkingWindowRange,
   formatWineOrigin,
+  getDrinkingWindowStatus,
   sortBottlesFifo,
 } from '@/services/domain/wineHelpers';
 import { useWineStore } from '@/store/useWineStore';
 import { BottomSheet } from '@/components/common/BottomSheet';
+import { PhotoLightbox, TastingPhotoThumb } from '@/components/common/PhotoLightbox';
 import { MemoText, PriceText } from '@/components/common/PriceText';
+import { StarRatingBadge } from '@/components/common/StarRating';
 import { WineColorBadge } from '@/components/common/WineColorBadge';
 import { WineThumbnail } from '@/components/common/WineThumbnail';
 import { MoveBottlePicker } from '@/components/cellar/MoveBottlePicker';
@@ -26,7 +31,12 @@ export function WineDetailSheet({ wineId, onClose }: WineDetailSheetProps) {
   const openQuickAdd = useWineStore((s) => s.openQuickAdd);
   const updateWineMaster = useWineStore((s) => s.updateWineMaster);
   const restoreBottleToStock = useWineStore((s) => s.restoreBottleToStock);
+  const uploadWineLabelPhoto = useWineStore((s) => s.uploadWineLabelPhoto);
+  const removeWineLabelPhoto = useWineStore((s) => s.removeWineLabelPhoto);
 
+  const labelInputRef = useRef<HTMLInputElement>(null);
+  const [uploadingLabel, setUploadingLabel] = useState(false);
+  const [lightboxFileId, setLightboxFileId] = useState<string | null>(null);
   const [consumeBottleId, setConsumeBottleId] = useState<string | null>(null);
   const [moveBottleId, setMoveBottleId] = useState<string | null>(null);
   const [showPastHistory, setShowPastHistory] = useState(false);
@@ -45,6 +55,8 @@ export function WineDetailSheet({ wineId, onClose }: WineDetailSheetProps) {
   const [draftVintage, setDraftVintage] = useState('');
   const [draftColor, setDraftColor] = useState<WineColor>('R');
   const [draftSizeMl, setDraftSizeMl] = useState(750);
+  const [draftDwStart, setDraftDwStart] = useState('');
+  const [draftDwEnd, setDraftDwEnd] = useState('');
 
   const locationMap = useMemo(
     () => new Map(db?.locations.map((l) => [l.id, l.displayName]) ?? []),
@@ -76,12 +88,16 @@ export function WineDetailSheet({ wineId, onClose }: WineDetailSheetProps) {
     setDraftVintage(wine.vintage);
     setDraftColor(wine.color);
     setDraftSizeMl(wine.bottleSizeMl);
+    setDraftDwStart(wine.drinkingWindowStart ? String(wine.drinkingWindowStart) : '');
+    setDraftDwEnd(wine.drinkingWindowEnd ? String(wine.drinkingWindowEnd) : '');
     setEditingMaster(true);
   };
 
   const saveEditMaster = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!draftName.trim() || !/^(\d{4}|NV)$/i.test(draftVintage.trim())) return;
+    const parsedStart = /^\d{4}$/.test(draftDwStart.trim()) ? Number(draftDwStart.trim()) : null;
+    const parsedEnd = /^\d{4}$/.test(draftDwEnd.trim()) ? Number(draftDwEnd.trim()) : null;
     const nextPatch = {
       name: draftName.trim(),
       producer: draftProducer.trim() || undefined,
@@ -91,6 +107,8 @@ export function WineDetailSheet({ wineId, onClose }: WineDetailSheetProps) {
       vintage: draftVintage.trim().toUpperCase(),
       color: draftColor,
       bottleSizeMl: draftSizeMl,
+      drinkingWindowStart: parsedStart,
+      drinkingWindowEnd: parsedEnd,
     };
 
     // ⑤ 보강: 수정 결과 기존 다른 마스터와 4중 키가 겹치면 확인 후 병합
@@ -117,6 +135,16 @@ export function WineDetailSheet({ wineId, onClose }: WineDetailSheetProps) {
 
   const moveTargetBottle = inStockBottles.find((b) => b.id === moveBottleId) ?? null;
   const sizeBadge = formatBottleSizeBadge(wine.bottleSizeMl);
+  const dwStatus = getDrinkingWindowStatus(wine);
+  const dwRange = formatDrinkingWindowRange(wine);
+  const dwMeta = dwStatus !== 'unset' ? DRINKING_WINDOW_BADGE_META[dwStatus] : null;
+  const ratedValues = pastRecords
+    .map((r) => r.tasting?.rating)
+    .filter((v): v is number => typeof v === 'number');
+  const avgRating =
+    ratedValues.length > 0
+      ? Math.round((ratedValues.reduce((acc, v) => acc + v, 0) / ratedValues.length) * 10) / 10
+      : null;
 
   return (
     <>
@@ -130,12 +158,64 @@ export function WineDetailSheet({ wineId, onClose }: WineDetailSheetProps) {
         <div className="space-y-4">
           {/* 상단 마스터 요약 */}
           <div className="flex items-start gap-3.5 rounded-2xl border border-subtle bg-elevated/45 p-3.5">
-            <WineThumbnail
-              color={wine.color}
-              vintage={wine.vintage}
-              labelImageFileId={wine.labelImageFileId}
-              size="lg"
-            />
+            <div className="flex shrink-0 flex-col items-center gap-1.5">
+              <WineThumbnail
+                color={wine.color}
+                vintage={wine.vintage}
+                labelImageFileId={wine.labelImageFileId}
+                size="lg"
+                onClick={
+                  wine.labelImageFileId
+                    ? () => setLightboxFileId(wine.labelImageFileId ?? null)
+                    : () => labelInputRef.current?.click()
+                }
+              />
+              <div className="flex items-center gap-1">
+                <button
+                  type="button"
+                  disabled={uploadingLabel}
+                  onClick={() => labelInputRef.current?.click()}
+                  className="inline-flex items-center gap-1 rounded-lg border border-subtle bg-surface px-2 py-1 text-[10px] font-bold text-secondary hover:border-forest hover:text-forest disabled:opacity-50"
+                  title="라벨 사진 촬영 또는 선택"
+                >
+                  <Camera className="h-3 w-3" />
+                  <span>{uploadingLabel ? '업로드...' : wine.labelImageFileId ? '교체' : '라벨'}</span>
+                </button>
+                {wine.labelImageFileId && (
+                  <button
+                    type="button"
+                    disabled={uploadingLabel}
+                    onClick={() => {
+                      if (window.confirm('등록된 라벨 사진을 삭제할까요?')) {
+                        void removeWineLabelPhoto(wine.id);
+                      }
+                    }}
+                    className="rounded-lg border border-subtle bg-surface p-1 text-secondary hover:border-[var(--status-danger)] hover:text-[var(--status-danger)]"
+                    title="라벨 사진 삭제"
+                    aria-label="라벨 사진 삭제"
+                  >
+                    <Trash2 className="h-3 w-3" />
+                  </button>
+                )}
+              </div>
+              <input
+                ref={labelInputRef}
+                type="file"
+                accept="image/*"
+                className="hidden"
+                onChange={async (e) => {
+                  const file = e.target.files?.[0];
+                  e.target.value = '';
+                  if (!file) return;
+                  setUploadingLabel(true);
+                  try {
+                    await uploadWineLabelPhoto(wine.id, file);
+                  } finally {
+                    setUploadingLabel(false);
+                  }
+                }}
+              />
+            </div>
             <div className="min-w-0 flex-1 space-y-2">
               <div className="flex flex-wrap items-center gap-1.5">
                 <WineColorBadge color={wine.color} showLabel />
@@ -147,6 +227,15 @@ export function WineDetailSheet({ wineId, onClose }: WineDetailSheetProps) {
                     {sizeBadge}
                   </span>
                 )}
+                {dwMeta && (
+                  <span
+                    className={`rounded-full border px-2 py-0.5 text-[11px] font-bold tabular-nums ${dwMeta.className}`}
+                  >
+                    {dwMeta.label}
+                    {dwRange ? ` (${dwRange})` : ''}
+                  </span>
+                )}
+                <StarRatingBadge rating={avgRating} count={ratedValues.length || undefined} size="sm" />
               </div>
 
               <div className="text-xs text-secondary">
@@ -252,6 +341,26 @@ export function WineDetailSheet({ wineId, onClose }: WineDetailSheetProps) {
                 placeholder="생산자 (선택)"
                 className="w-full rounded-xl border border-subtle bg-surface px-3 py-2 text-xs text-primary"
               />
+              <div className="grid grid-cols-2 gap-2">
+                <input
+                  type="number"
+                  min={1900}
+                  max={2150}
+                  value={draftDwStart}
+                  onChange={(e) => setDraftDwStart(e.target.value)}
+                  placeholder="음용 적기 시작연도 (예: 2026)"
+                  className="rounded-xl border border-subtle bg-surface px-3 py-2 text-xs tabular-nums text-primary"
+                />
+                <input
+                  type="number"
+                  min={1900}
+                  max={2150}
+                  value={draftDwEnd}
+                  onChange={(e) => setDraftDwEnd(e.target.value)}
+                  placeholder="음용 적기 종료연도 (예: 2032)"
+                  className="rounded-xl border border-subtle bg-surface px-3 py-2 text-xs tabular-nums text-primary"
+                />
+              </div>
               <div className="flex justify-end gap-2">
                 <button
                   type="button"
@@ -336,8 +445,18 @@ export function WineDetailSheet({ wineId, onClose }: WineDetailSheetProps) {
                             <span className="tabular-nums font-medium text-primary">
                               {tasting?.eventDate ?? '날짜 미상'}
                             </span>
+                            {tasting?.rating !== null && tasting?.rating !== undefined && (
+                              <span className="ml-1.5 inline-flex align-middle">
+                                <StarRatingBadge rating={tasting.rating} />
+                              </span>
+                            )}
                             {tasting?.occasion && (
                               <span className="ml-1.5 text-secondary">· {tasting.occasion}</span>
+                            )}
+                            {tasting?.companions && (
+                              <span className="ml-1.5 inline-flex items-center gap-0.5 text-secondary">
+                                · <Users className="h-3 w-3 text-forest" /> {tasting.companions}
+                              </span>
                             )}
                           </div>
                           <div className="flex shrink-0 items-center gap-2">
@@ -361,9 +480,26 @@ export function WineDetailSheet({ wineId, onClose }: WineDetailSheetProps) {
                             </button>
                           </div>
                         </div>
+                        {tasting?.tastingNote && (
+                          <p className="whitespace-pre-line rounded-md bg-elevated/55 px-2 py-1 text-[11px] leading-relaxed text-primary">
+                            {tasting.tastingNote}
+                          </p>
+                        )}
                         {tasting?.memo && (
                           <div className="text-[11px] text-secondary">
                             <MemoText text={tasting.memo} />
+                          </div>
+                        )}
+                        {tasting?.photoFileIds && tasting.photoFileIds.length > 0 && (
+                          <div className="flex flex-wrap gap-1.5 pt-1">
+                            {tasting.photoFileIds.map((pid) => (
+                              <TastingPhotoThumb
+                                key={pid}
+                                fileId={pid}
+                                alt={`${wine.name} 시음 사진`}
+                                onClick={() => setLightboxFileId(pid)}
+                              />
+                            ))}
                           </div>
                         )}
                       </div>
@@ -390,6 +526,12 @@ export function WineDetailSheet({ wineId, onClose }: WineDetailSheetProps) {
         currentLocationId={moveTargetBottle?.locationId ?? null}
         wineLabel={`${wine.name} (${wine.vintage})`}
         onClose={() => setMoveBottleId(null)}
+      />
+
+      <PhotoLightbox
+        fileId={lightboxFileId}
+        alt={`${wine.name} 사진`}
+        onClose={() => setLightboxFileId(null)}
       />
     </>
   );

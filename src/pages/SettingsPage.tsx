@@ -120,6 +120,7 @@ export function SettingsPage() {
                 {lastSyncedModifiedTime
                   ? new Date(lastSyncedModifiedTime).toLocaleString('ko-KR')
                   : '아직 없음'}
+                {db.metadata.deviceLabel ? ` (${db.metadata.deviceLabel})` : ''}
                 {hasUnsyncedChanges ? ' · 미동기화 변경 있음' : ''}
               </p>
             </div>

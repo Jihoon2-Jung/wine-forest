@@ -1,9 +1,11 @@
-import { Check, Gift, Pencil, RotateCcw, Wine, X } from 'lucide-react';
-import { useState } from 'react';
+import { Camera, Check, Gift, Pencil, RotateCcw, Users, Wine, X } from 'lucide-react';
+import { useRef, useState } from 'react';
 import type { BottleInstance, CellarLocation, TastingRecord, WineMaster } from '@/types/schema';
 import { formatWineOrigin } from '@/services/domain/wineHelpers';
 import { useWineStore } from '@/store/useWineStore';
+import { PhotoLightbox, TastingPhotoThumb } from '@/components/common/PhotoLightbox';
 import { MemoText, PriceText } from '@/components/common/PriceText';
+import { StarRatingBadge, StarRatingInput } from '@/components/common/StarRating';
 import { WineColorBadge } from '@/components/common/WineColorBadge';
 
 interface HistoryCardProps {
@@ -16,7 +18,12 @@ interface HistoryCardProps {
 export function HistoryCard({ tasting, bottle, wine, locations }: HistoryCardProps) {
   const restoreBottleToStock = useWineStore((s) => s.restoreBottleToStock);
   const updateTastingRecord = useWineStore((s) => s.updateTastingRecord);
+  const uploadTastingPhoto = useWineStore((s) => s.uploadTastingPhoto);
+  const deleteTastingPhotoFile = useWineStore((s) => s.deleteTastingPhotoFile);
 
+  const photoInputRef = useRef<HTMLInputElement>(null);
+  const [lightboxFileId, setLightboxFileId] = useState<string | null>(null);
+  const [uploadingPhoto, setUploadingPhoto] = useState(false);
   const [restoring, setRestoring] = useState(false);
   const [restoreLocId, setRestoreLocId] = useState<string>(
     bottle.locationId && locations.some((l) => l.id === bottle.locationId)
@@ -24,12 +31,16 @@ export function HistoryCard({ tasting, bottle, wine, locations }: HistoryCardPro
       : locations[0]?.id ?? '',
   );
 
-  // M7 보강: 소비/선물 이력 간단 수정
+  // M7 + Phase 2-2 보강: 소비/선물 이력 + 별점·동반자·시음노트 수정
   const [editing, setEditing] = useState(false);
   const [draftType, setDraftType] = useState<'CONSUMED' | 'GIFTED'>(tasting.type);
   const [draftDate, setDraftDate] = useState(tasting.eventDate ?? '');
   const [draftOccasion, setDraftOccasion] = useState(tasting.occasion ?? '');
   const [draftMemo, setDraftMemo] = useState(tasting.memo ?? '');
+  const [draftRating, setDraftRating] = useState<number | null>(tasting.rating ?? null);
+  const [draftCompanions, setDraftCompanions] = useState(tasting.companions ?? '');
+  const [draftTastingNote, setDraftTastingNote] = useState(tasting.tastingNote ?? '');
+  const [draftPhotoFileIds, setDraftPhotoFileIds] = useState<string[]>(tasting.photoFileIds ?? []);
 
   const isGift = tasting.type === 'GIFTED';
 
@@ -44,6 +55,10 @@ export function HistoryCard({ tasting, bottle, wine, locations }: HistoryCardPro
       eventDate: draftDate || null,
       occasion: draftOccasion,
       memo: draftMemo,
+      rating: draftRating,
+      companions: draftCompanions,
+      tastingNote: draftTastingNote,
+      photoFileIds: draftPhotoFileIds,
     });
     setEditing(false);
   };
@@ -68,6 +83,7 @@ export function HistoryCard({ tasting, bottle, wine, locations }: HistoryCardPro
             <span className="font-serif text-xs font-bold tabular-nums text-gold">
               {wine.vintage}
             </span>
+            <StarRatingBadge rating={tasting.rating} />
           </div>
 
           <h3 className="text-sm font-bold text-primary">{wine.name}</h3>
@@ -80,12 +96,38 @@ export function HistoryCard({ tasting, bottle, wine, locations }: HistoryCardPro
                 <span className="font-semibold text-primary">{tasting.occasion}</span>
               </>
             )}
+            {tasting.companions && (
+              <span className="inline-flex items-center gap-1 text-secondary">
+                <span>·</span>
+                <Users className="h-3 w-3 text-forest" />
+                <span>{tasting.companions}</span>
+              </span>
+            )}
           </div>
+
+          {tasting.tastingNote && (
+            <p className="whitespace-pre-line rounded-lg bg-elevated/60 px-2.5 py-1.5 text-xs leading-relaxed text-primary">
+              {tasting.tastingNote}
+            </p>
+          )}
 
           {tasting.memo && (
             <p className="text-xs text-secondary">
               <MemoText text={tasting.memo} />
             </p>
+          )}
+
+          {tasting.photoFileIds && tasting.photoFileIds.length > 0 && (
+            <div className="flex flex-wrap gap-1.5 pt-1">
+              {tasting.photoFileIds.map((pid) => (
+                <TastingPhotoThumb
+                  key={pid}
+                  fileId={pid}
+                  alt={`${wine.name} 시음 사진`}
+                  onClick={() => setLightboxFileId(pid)}
+                />
+              ))}
+            </div>
           )}
         </div>
 
@@ -185,11 +227,82 @@ export function HistoryCard({ tasting, bottle, wine, locations }: HistoryCardPro
           />
           <input
             type="text"
-            value={draftMemo}
-            onChange={(e) => setDraftMemo(e.target.value)}
-            placeholder="메모"
+            value={draftCompanions}
+            onChange={(e) => setDraftCompanions(e.target.value)}
+            placeholder="함께한 사람 (동반자)"
             className="w-full rounded-lg border border-subtle bg-surface px-2.5 py-1.5 text-xs text-primary"
           />
+          <div className="rounded-lg border border-subtle bg-surface px-2.5 py-2">
+            <span className="mb-1 block text-[11px] font-semibold text-secondary">평점 (5.0 만점)</span>
+            <StarRatingInput value={draftRating} onChange={setDraftRating} />
+          </div>
+          <textarea
+            rows={3}
+            value={draftTastingNote}
+            onChange={(e) => setDraftTastingNote(e.target.value)}
+            placeholder="상세 시음노트 (향, 산미, 타닌, 페어링 등)"
+            className="w-full resize-y rounded-lg border border-subtle bg-surface px-2.5 py-1.5 text-xs leading-relaxed text-primary"
+          />
+          <input
+            type="text"
+            value={draftMemo}
+            onChange={(e) => setDraftMemo(e.target.value)}
+            placeholder="간단 메모 (프라이버시 모드 시 숨김)"
+            className="w-full rounded-lg border border-subtle bg-surface px-2.5 py-1.5 text-xs text-primary"
+          />
+          <div className="space-y-1.5 rounded-lg border border-subtle bg-surface px-2.5 py-2">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-semibold text-secondary">
+                시음 사진 ({draftPhotoFileIds.length}/3)
+              </span>
+              {draftPhotoFileIds.length < 3 && (
+                <button
+                  type="button"
+                  disabled={uploadingPhoto}
+                  onClick={() => photoInputRef.current?.click()}
+                  className="inline-flex items-center gap-1 rounded-md border border-subtle bg-elevated px-2 py-1 text-[11px] font-bold text-primary hover:border-forest hover:text-forest disabled:opacity-50"
+                >
+                  <Camera className="h-3 w-3" />
+                  <span>{uploadingPhoto ? '업로드 중...' : '사진 추가'}</span>
+                </button>
+              )}
+            </div>
+            {draftPhotoFileIds.length > 0 && (
+              <div className="flex flex-wrap gap-1.5">
+                {draftPhotoFileIds.map((pid) => (
+                  <TastingPhotoThumb
+                    key={pid}
+                    fileId={pid}
+                    onClick={() => setLightboxFileId(pid)}
+                    onRemove={() => {
+                      setDraftPhotoFileIds((prev) => prev.filter((id) => id !== pid));
+                      void deleteTastingPhotoFile(pid);
+                    }}
+                  />
+                ))}
+              </div>
+            )}
+            <input
+              ref={photoInputRef}
+              type="file"
+              accept="image/*"
+              className="hidden"
+              onChange={async (e) => {
+                const file = e.target.files?.[0];
+                e.target.value = '';
+                if (!file || draftPhotoFileIds.length >= 3) return;
+                setUploadingPhoto(true);
+                try {
+                  const uploadedId = await uploadTastingPhoto(file);
+                  if (uploadedId) {
+                    setDraftPhotoFileIds((prev) => [...prev, uploadedId]);
+                  }
+                } finally {
+                  setUploadingPhoto(false);
+                }
+              }}
+            />
+          </div>
           <div className="flex justify-end gap-1.5">
             <button
               type="button"
@@ -210,6 +323,11 @@ export function HistoryCard({ tasting, bottle, wine, locations }: HistoryCardPro
           </div>
         </div>
       )}
+      <PhotoLightbox
+        fileId={lightboxFileId}
+        alt={`${wine.name} 시음 사진`}
+        onClose={() => setLightboxFileId(null)}
+      />
     </div>
   );
 }

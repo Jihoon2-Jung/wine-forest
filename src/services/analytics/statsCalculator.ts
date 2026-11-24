@@ -6,6 +6,7 @@ import {
   type WineDatabase,
   type WineMaster,
 } from '@/types/schema';
+import { getDrinkingWindowStatus } from '@/services/domain/wineHelpers';
 
 export interface KpiSummary {
   inStockCount: number;
@@ -362,4 +363,64 @@ export function calculatePriceDistribution(db: WineDatabase): PriceBucketItem[] 
   }
 
   return result;
+}
+
+export interface DrinkingWindowSummary {
+  readyBottles: number;
+  readyWines: number;
+  closingSoonBottles: number;
+  closingSoonWines: number;
+  pastPeakBottles: number;
+  pastPeakWines: number;
+  tooYoungBottles: number;
+  tooYoungWines: number;
+  configuredBottles: number;
+}
+
+export function calculateDrinkingWindowSummary(
+  db: WineDatabase,
+  currentYear: number = new Date().getFullYear(),
+): DrinkingWindowSummary {
+  const wineMap = new Map(db.wines.map((w) => [w.id, w]));
+  const readySet = new Set<string>();
+  const closingSet = new Set<string>();
+  const pastSet = new Set<string>();
+  const youngSet = new Set<string>();
+
+  let readyBottles = 0;
+  let closingSoonBottles = 0;
+  let pastPeakBottles = 0;
+  let tooYoungBottles = 0;
+
+  for (const b of db.bottles) {
+    if (b.status !== 'IN_STOCK') continue;
+    const wine = wineMap.get(b.wineId);
+    if (!wine) continue;
+    const status = getDrinkingWindowStatus(wine, currentYear);
+    if (status === 'ready') {
+      readyBottles += 1;
+      readySet.add(wine.id);
+    } else if (status === 'closing_soon') {
+      closingSoonBottles += 1;
+      closingSet.add(wine.id);
+    } else if (status === 'past_peak') {
+      pastPeakBottles += 1;
+      pastSet.add(wine.id);
+    } else if (status === 'too_young') {
+      tooYoungBottles += 1;
+      youngSet.add(wine.id);
+    }
+  }
+
+  return {
+    readyBottles,
+    readyWines: readySet.size,
+    closingSoonBottles,
+    closingSoonWines: closingSet.size,
+    pastPeakBottles,
+    pastPeakWines: pastSet.size,
+    tooYoungBottles,
+    tooYoungWines: youngSet.size,
+    configuredBottles: readyBottles + closingSoonBottles + pastPeakBottles + tooYoungBottles,
+  };
 }

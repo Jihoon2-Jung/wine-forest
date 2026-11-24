@@ -1,4 +1,5 @@
 import type { WineColor } from '@/types/schema';
+import { usePhotoUrl } from '@/services/media/photoLoader';
 import { getWineColorBorderCssVar, getWineColorCssVar } from './WineColorBadge';
 
 interface WineThumbnailProps {
@@ -6,21 +7,24 @@ interface WineThumbnailProps {
   vintage: string;
   labelImageFileId?: string | null;
   size?: 'sm' | 'md' | 'lg';
+  onClick?: () => void;
 }
 
 /**
- * Phase 2 라벨 사진 예약 슬롯:
- * - labelImageFileId가 추후 연결되면 실제 라벨 이미지를 렌더링
- * - 1차 MVP에서는 와인 색상별 프리미엄 미니멀 보틀 실루엣 + 빈티지 워터마크 표시
+ * Phase 2-3A 라벨 사진 & 보틀 플레이스홀더 썸네일:
+ * - labelImageFileId가 로컬 IndexedDB 캐시 또는 Google Drive에서 해석되면 실제 라벨 이미지 표시
+ * - 미등록 또는 오프라인 미캐싱 상태에서는 와인 색상별 프리미엄 미니멀 보틀 실루엣 표시
  */
 export function WineThumbnail({
   color,
   vintage,
   labelImageFileId,
   size = 'md',
+  onClick,
 }: WineThumbnailProps) {
   const accent = getWineColorCssVar(color);
   const bottleStroke = getWineColorBorderCssVar(color) ?? 'none';
+  const photoUrl = usePhotoUrl(labelImageFileId);
   const dims =
     size === 'sm'
       ? 'w-11 h-16'
@@ -28,19 +32,33 @@ export function WineThumbnail({
         ? 'w-16 h-24'
         : 'w-13 h-[74px]';
 
-  // Phase 2 hook placeholder (URL resolution will plug in here)
-  const hasPhoto = Boolean(labelImageFileId && labelImageFileId.startsWith('http'));
+  const hasPhoto = Boolean(photoUrl);
 
   return (
     <div
-      className={`relative shrink-0 overflow-hidden rounded-xl border border-subtle bg-elevated flex flex-col items-center justify-center select-none ${dims}`}
+      onClick={onClick}
+      role={onClick ? 'button' : undefined}
+      tabIndex={onClick ? 0 : undefined}
+      onKeyDown={
+        onClick
+          ? (e) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                onClick();
+              }
+            }
+          : undefined
+      }
+      className={`relative shrink-0 overflow-hidden rounded-xl border border-subtle bg-elevated flex flex-col items-center justify-center select-none ${dims} ${
+        onClick ? 'cursor-pointer transition-opacity hover:opacity-90' : ''
+      }`}
       style={{
         background: `linear-gradient(155deg, color-mix(in srgb, ${accent} 14%, var(--bg-elevated)), var(--bg-elevated))`,
       }}
     >
-      {hasPhoto && labelImageFileId ? (
+      {hasPhoto && photoUrl ? (
         <img
-          src={labelImageFileId}
+          src={photoUrl}
           alt="와인 라벨"
           className="h-full w-full object-cover"
           loading="lazy"

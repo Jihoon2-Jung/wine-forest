@@ -26,6 +26,8 @@ import { GoogleDriveAdapter } from '@/services/storage/googleDriveAdapter';
 import { clearCachedState, loadCachedState, saveCachedState } from '@/services/storage/localCache';
 import { LocalOnlyAdapter } from '@/services/storage/localOnlyAdapter';
 import { syncEngine } from '@/services/storage/syncEngine';
+import { compressImageFile } from '@/services/media/imageProcessor';
+import { evictPhotoFromCache, registerUploadedPhotoBlob } from '@/services/media/photoLoader';
 import {
   AuthRequiredError,
   ConflictError,
@@ -46,6 +48,8 @@ export type InventorySortKey =
   | 'quantity_desc'
   | 'name_asc';
 
+export type DrinkingWindowFilter = '' | 'ready_now' | 'closing_soon' | 'past_peak' | 'too_young';
+
 export interface InventoryFilters {
   query: string;
   colors: WineColor[];
@@ -53,6 +57,7 @@ export interface InventoryFilters {
   region: string; // '' = 전체
   subRegion: string; // '' = 전체
   zone: string; // '' = 전체, '__UNASSIGNED__' = 미지정
+  drinkingWindow: DrinkingWindowFilter;
   sortBy: InventorySortKey;
   includeOutOfStock: boolean;
 }
@@ -86,6 +91,8 @@ export interface AddBottlesInput {
   fxNote?: string;
   memo?: string;
   includeInTrackingSince?: boolean;
+  drinkingWindowStart?: number | null;
+  drinkingWindowEnd?: number | null;
 }
 
 export interface ConsumeBottleInput {
@@ -94,6 +101,10 @@ export interface ConsumeBottleInput {
   eventDate: string | null;
   occasion?: string;
   memo?: string;
+  companions?: string;
+  rating?: number | null;
+  tastingNote?: string;
+  photoFileIds?: string[];
 }
 
 export interface ToastMessage {
@@ -149,6 +160,34 @@ export function applyThemeToDom(theme: ThemeMode): void {
   }
 }
 
+function detectDeviceLabel(): string {
+  if (typeof navigator === 'undefined') return 'Web';
+  const ua = navigator.userAgent || '';
+  const os = /iPhone/i.test(ua)
+    ? 'iPhone'
+    : /iPad/i.test(ua)
+      ? 'iPad'
+      : /Android/i.test(ua)
+        ? 'Android'
+        : /Mac/i.test(ua)
+          ? 'Mac'
+          : /Windows/i.test(ua)
+            ? 'Windows'
+            : /Linux/i.test(ua)
+              ? 'Linux'
+              : 'Web';
+  const browser = /Edg\//i.test(ua)
+    ? 'Edge'
+    : /CriOS|Chrome/i.test(ua)
+      ? 'Chrome'
+      : /FxiOS|Firefox/i.test(ua)
+        ? 'Firefox'
+        : /Safari/i.test(ua)
+          ? 'Safari'
+          : '';
+  return browser ? `${os} ${browser}` : os;
+}
+
 const googleDriveAdapter = new GoogleDriveAdapter();
 const localOnlyAdapter = new LocalOnlyAdapter();
 
@@ -163,6 +202,7 @@ const DEFAULT_FILTERS: InventoryFilters = {
   region: '',
   subRegion: '',
   zone: '',
+  drinkingWindow: '',
   sortBy: 'recent_purchase',
   includeOutOfStock: false,
 };
@@ -226,12 +266,23 @@ interface WineStoreState {
   restoreBottleToStock: (bottleId: string, targetLocationId: string | null) => Promise<void>;
   updateTastingRecord: (
     tastingId: string,
-    patch: Partial<Pick<TastingRecord, 'eventDate' | 'occasion' | 'memo' | 'type'>>,
+    patch: Partial<
+      Pick<
+        TastingRecord,
+        'eventDate' | 'occasion' | 'memo' | 'type' | 'companions' | 'rating' | 'tastingNote' | 'photoFileIds'
+      >
+    >,
   ) => Promise<void>;
   addLocation: (loc: Omit<CellarLocation, 'id'>) => Promise<void>;
   updateLocation: (id: string, patch: Partial<Omit<CellarLocation, 'id'>>) => Promise<void>;
   deleteLocation: (id: string) => Promise<void>;
   updateTrackingSinceDate: (newDate: string, recalculateExisting: boolean) => Promise<void>;
+
+  // Phase 2-3A: Media (Label & Tasting Photos)
+  uploadWineLabelPhoto: (wineId: string, file: File) => Promise<void>;
+  removeWineLabelPhoto: (wineId: string) => Promise<void>;
+  uploadTastingPhoto: (file: File) => Promise<string | null>;
+  deleteTastingPhotoFile: (fileId: string) => Promise<void>;
 
   // UI Actions
   togglePrivacyMode: () => void;
@@ -276,6 +327,7 @@ export const useWineStore = create<WineStoreState>((set, get) => {
       metadata: {
         ...nextDb.metadata,
         lastModifiedAt: nowIso,
+        deviceLabel: detectDeviceLabel(),
       },
     };
 
@@ -955,6 +1007,23 @@ export const useWineStore = create<WineStoreState>((set, get) => {
 
       if (existingMaster) {
         wineId = existingMaster.id;
+        // 기존 마스터에 음용 적기가 비어 있고 새로 입력되었으면 함께 업데이트
+        if (
+          (input.drinkingWindowStart != null || input.drinkingWindowEnd != null) &&
+          existingMaster.drinkingWindowStart == null &&
+          existingMaster.drinkingWindowEnd == null
+        ) {
+          nextWines = db.wines.map((w) =>
+            w.id === existingMaster.id
+              ? {
+                  ...w,
+                  drinkingWindowStart: input.drinkingWindowStart ?? null,
+                  drinkingWindowEnd: input.drinkingWindowEnd ?? null,
+                  updatedAt: now,
+                }
+              : w,
+          );
+        }
       } else {
         wineId = generateId();
         const newMaster: WineMaster = {
@@ -968,8 +1037,8 @@ export const useWineStore = create<WineStoreState>((set, get) => {
           vintage,
           bottleSizeMl: sizeMl,
           labelImageFileId: null,
-          drinkingWindowStart: null,
-          drinkingWindowEnd: null,
+          drinkingWindowStart: input.drinkingWindowStart ?? null,
+          drinkingWindowEnd: input.drinkingWindowEnd ?? null,
           createdAt: now,
           updatedAt: now,
         };
@@ -1102,7 +1171,17 @@ export const useWineStore = create<WineStoreState>((set, get) => {
       await commitMutation({ ...db, bottles: nextBottles }, `${locName}(으)로 이동했습니다.`);
     },
 
-    consumeOrGiftBottle: async ({ bottleId, type, eventDate, occasion, memo }) => {
+    consumeOrGiftBottle: async ({
+      bottleId,
+      type,
+      eventDate,
+      occasion,
+      memo,
+      companions,
+      rating,
+      tastingNote,
+      photoFileIds,
+    }) => {
       const db = get().db;
       if (!db) return;
       const now = new Date().toISOString();
@@ -1123,6 +1202,10 @@ export const useWineStore = create<WineStoreState>((set, get) => {
         eventDate: eventDate || getTodayIsoDate(),
         occasion: occasion?.trim() || undefined,
         memo: memo?.trim() || undefined,
+        companions: companions?.trim() || undefined,
+        rating: rating ?? null,
+        tastingNote: tastingNote?.trim() || undefined,
+        photoFileIds: photoFileIds && photoFileIds.length > 0 ? photoFileIds : undefined,
         createdAt: now,
       };
       const filteredTastings = db.tastings.filter((t) => t.bottleId !== bottleId);
@@ -1173,6 +1256,17 @@ export const useWineStore = create<WineStoreState>((set, get) => {
               ...patch,
               occasion: patch.occasion !== undefined ? patch.occasion.trim() || undefined : t.occasion,
               memo: patch.memo !== undefined ? patch.memo.trim() || undefined : t.memo,
+              companions:
+                patch.companions !== undefined ? patch.companions.trim() || undefined : t.companions,
+              tastingNote:
+                patch.tastingNote !== undefined ? patch.tastingNote.trim() || undefined : t.tastingNote,
+              rating: patch.rating !== undefined ? patch.rating : t.rating,
+              photoFileIds:
+                patch.photoFileIds !== undefined
+                  ? patch.photoFileIds.length > 0
+                    ? patch.photoFileIds
+                    : undefined
+                  : t.photoFileIds,
             }
           : t,
       );
@@ -1260,6 +1354,94 @@ export const useWineStore = create<WineStoreState>((set, get) => {
           ? `누적 지출 기준일을 ${newDate}로 변경하고 전체 병을 재계산했습니다.`
           : `누적 지출 기준일을 ${newDate}로 변경했습니다.`,
       );
+    },
+
+    uploadWineLabelPhoto: async (wineId, file) => {
+      const state = get();
+      const db = state.db;
+      if (!db) return;
+      if (state.storageMode === 'google_drive' && !isTokenValid()) {
+        set({ syncStatus: 'auth_required' });
+        get().showToast('사진을 업로드하려면 상단 [구글 재인증]을 먼저 눌러 주세요.', 'warning');
+        return;
+      }
+
+      const wine = db.wines.find((w) => w.id === wineId);
+      if (!wine) return;
+
+      try {
+        const processed = await compressImageFile(file, 'label');
+        const adapter = getAdapter(state.storageMode);
+        const fileName = `label_${wineId.slice(0, 8)}_${Date.now()}.${processed.extension}`;
+        const { fileId } = await adapter.uploadPhoto(processed.blob, fileName);
+        await registerUploadedPhotoBlob(fileId, processed.blob);
+
+        const oldFileId = wine.labelImageFileId;
+        const now = new Date().toISOString();
+        const nextWines = db.wines.map((w) =>
+          w.id === wineId ? { ...w, labelImageFileId: fileId, updatedAt: now } : w,
+        );
+        await commitMutation({ ...db, wines: nextWines }, '와인 라벨 사진을 등록했습니다.');
+
+        if (oldFileId && oldFileId !== fileId) {
+          void adapter.deletePhoto(oldFileId).catch(() => undefined);
+          void evictPhotoFromCache(oldFileId);
+        }
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : '라벨 사진 업로드에 실패했습니다.';
+        get().showToast(msg, 'error');
+      }
+    },
+
+    removeWineLabelPhoto: async (wineId) => {
+      const state = get();
+      const db = state.db;
+      if (!db) return;
+      const wine = db.wines.find((w) => w.id === wineId);
+      if (!wine?.labelImageFileId) return;
+
+      const oldFileId = wine.labelImageFileId;
+      const now = new Date().toISOString();
+      const nextWines = db.wines.map((w) =>
+        w.id === wineId ? { ...w, labelImageFileId: null, updatedAt: now } : w,
+      );
+      await commitMutation({ ...db, wines: nextWines }, '라벨 사진을 삭제했습니다.');
+
+      const adapter = getAdapter(state.storageMode);
+      if (state.storageMode === 'local_test' || isTokenValid()) {
+        void adapter.deletePhoto(oldFileId).catch(() => undefined);
+      }
+      void evictPhotoFromCache(oldFileId);
+    },
+
+    uploadTastingPhoto: async (file) => {
+      const state = get();
+      if (state.storageMode === 'google_drive' && !isTokenValid()) {
+        set({ syncStatus: 'auth_required' });
+        get().showToast('사진을 업로드하려면 상단 [구글 재인증]을 먼저 눌러 주세요.', 'warning');
+        return null;
+      }
+      try {
+        const processed = await compressImageFile(file, 'tasting');
+        const adapter = getAdapter(state.storageMode);
+        const fileName = `tasting_${Date.now()}_${Math.random().toString(36).slice(2, 6)}.${processed.extension}`;
+        const { fileId } = await adapter.uploadPhoto(processed.blob, fileName);
+        await registerUploadedPhotoBlob(fileId, processed.blob);
+        return fileId;
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : '시음 사진 업로드에 실패했습니다.';
+        get().showToast(msg, 'error');
+        return null;
+      }
+    },
+
+    deleteTastingPhotoFile: async (fileId) => {
+      const state = get();
+      const adapter = getAdapter(state.storageMode);
+      if (state.storageMode === 'local_test' || isTokenValid()) {
+        void adapter.deletePhoto(fileId).catch(() => undefined);
+      }
+      void evictPhotoFromCache(fileId);
     },
 
     // --- UI Actions ---

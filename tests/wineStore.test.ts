@@ -31,6 +31,9 @@ vi.mock('@/services/storage/localCache', () => ({
   loadLocalBackup: vi.fn(async (fileId: string) => {
     return memoryCache.backups.find((b) => b.fileId === fileId)?.data ?? null;
   }),
+  getCachedPhoto: vi.fn(async () => null),
+  putCachedPhoto: vi.fn(async () => undefined),
+  deleteCachedPhoto: vi.fn(async () => undefined),
 }));
 
 import { useWineStore } from '@/store/useWineStore';
@@ -237,5 +240,23 @@ describe('useWineStore — Domain Mutations & Data Integrity', () => {
     expect(restoredBottle.status).toBe('IN_STOCK');
     expect(restoredBottle.locationId).toBe(prevLoc);
     expect(afterRestore.tastings.some((t) => t.bottleId === target.id)).toBe(false);
+  });
+
+  it('renames a shelf via updateLocation and refreshes metadata.deviceLabel on commit', async () => {
+    const firstLoc = useWineStore.getState().db!.locations[0];
+    await useWineStore.getState().updateLocation(firstLoc.id, {
+      zone: '삼성',
+      shelf: '1-9',
+      displayName: '삼성 1-9 (테스트)',
+      maxCapacity: 12,
+    });
+
+    const dbAfter = useWineStore.getState().db!;
+    const renamed = dbAfter.locations.find((l) => l.id === firstLoc.id)!;
+    expect(renamed.shelf).toBe('1-9');
+    expect(renamed.displayName).toBe('삼성 1-9 (테스트)');
+    expect(renamed.maxCapacity).toBe(12);
+    expect(dbAfter.metadata.deviceLabel).toBeTruthy();
+    expect(dbAfter.metadata.deviceLabel).not.toBe('Local Demo');
   });
 });

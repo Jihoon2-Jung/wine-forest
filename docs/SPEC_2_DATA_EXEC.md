@@ -122,6 +122,9 @@ export interface StorageAdapter {
   createBackup(data: WineDatabase, fileName: string): Promise<BackupSnapshot>;
   listBackups(): Promise<BackupSnapshot[]>;
   loadBackup(fileId: string): Promise<WineDatabase>;
+  uploadPhoto(blob: Blob, fileName: string): Promise<{ fileId: string }>;
+  downloadPhoto(fileId: string): Promise<Blob>;
+  deletePhoto(fileId: string): Promise<void>;
 }
 ```
 
@@ -217,16 +220,15 @@ python3 local_migration_script \
 
 ---
 
-## 7. Phase 2 확장성 아키텍처 예약 (1차 구현 제외 범위)
+## 7. Phase 2 구현 완료 내역 및 향후 확장 범위
 
-> **에이전트 주의:** 아래 3개 기능은 **2차 개발 범위**이므로 1차 MVP에서 UI를 구현하지 마십시오. 단, 2차 때 스키마·코드를 뜯어고치지 않도록 아래 확장 포인트만 보존하십시오.
-
-1. **라벨 사진 자동 크롤링 & 검수 파이프라인 (2차):**
-   * 1차에서는 `WineMaster.labelImageFileId` 필드, Drive `JH_Wine_Forest/photos/` 폴더 생성 준비, `<WineThumbnail />`의 이미지/플레이스홀더 분기 구조만 구현합니다. (참고 목표 스펙: 500px WebP, 장당 ~45KB, 500종 약 22MB)
-2. **구조화된 시음노트 & 평점 (2차):**
-   * `TastingRecord`의 `rating`, `tastingNote`, `companions`, `photoFileIds` 필드를 JSON 직렬화/검증에서 보존합니다.
-3. **적정 음용 시기(Drinking Window) 알림 (2차):**
-   * `WineMaster`의 `drinkingWindowStart`, `drinkingWindowEnd` 필드를 스키마에 보존합니다.
+1. **적정 음용 시기 (Phase 2-1 — 구현 완료):**
+   * `WineMaster.drinkingWindowStart`, `drinkingWindowEnd` 입력·편집, 4단계 상태 판정(`숙성 중`/`지금 적기`/`마감 임박`/`적기 경과`), 목록 배지·필터, 통계 대시보드 드릴다운 카드 구현.
+2. **구조화된 시음노트 & 5.0 별점 (Phase 2-2 — 구현 완료):**
+   * `TastingRecord`의 `rating`(5.0 만점, 0.5 단위), `tastingNote`, `companions` 입력·인라인 편집, 평점순 정렬/필터, 상세 시트 평균 별점 구현. (프라이버시 모드 ON 시에도 `tastingNote`·`companions`·`rating`은 표시, 기존 `memo`만 마스킹)
+3. **미디어 파이프라인 — 라벨 & 시음 사진 (Phase 2-3A — 구현 완료):**
+   * 클라이언트 Canvas 자동 압축(`imageProcessor.ts`: 라벨 500px / 시음 1024px WebP, JPEG 폴백), Drive `JH_Wine_Forest/photos/` + `LocalOnlyAdapter` IndexedDB `photoCache`(DB v2) 오프라인 캐시, `<WineThumbnail />` 실이미지, 라벨 등록/교체/삭제, 시음 사진(최대 3장) 첨부 및 `PhotoLightbox` 확대 뷰어 구현.
+   * **추후 확장(Phase 2-3B):** 기존 대량 와인 라벨 일괄 검색·사용자 컨펌용 PC 보조 파이프라인은 사용자 요청 시 별도 진행.
 
 ---
 
@@ -246,32 +248,35 @@ wine-forest/
 │   └── requirements.txt            # openpyxl
 ├── src/
 │   ├── components/
-│   │   ├── common/                 # PriceText(FxNoteText·MemoText 포함), WineColorBadge, WineThumbnail, BottomSheet, ConflictModal, SyncBadge, ToastBar
+│   │   ├── common/                 # PriceText(FxNoteText·MemoText 포함), WineColorBadge, WineThumbnail, StarRating, PhotoLightbox, BottomSheet, ConflictModal, SyncBadge, ToastBar
 │   │   ├── layout/                 # AppShell, TopHeader, BottomNav, DesktopSidebar, FabButton
 │   │   ├── wines/                  # WineGroupCard, WineDetailSheet, BottleRow, FilterBar, QuickAddModal, QuickConsumeModal
 │   │   ├── cellar/                 # ShelfCard, ShelfDetailDrawer, MoveBottlePicker, ShelfConfigModal (배치도는 CellarMapPage 통합)
-│   │   ├── history/                # HistoryCard (월별 타임라인·더보기는 HistoryPage 통합)
+│   │   ├── history/                # HistoryCard (월별 타임라인·평점 정렬·더보기는 HistoryPage 통합)
 │   │   └── stats/                  # KpiGrid, ColorDonutChart, RegionBarChart, TrendChart, PriceDistChart
 │   ├── pages/
 │   │   ├── InventoryPage.tsx       # 탭 1 (기본 홈)
 │   │   ├── CellarMapPage.tsx       # 탭 2 (물리적 수직 셀러 캐비닛 배치도)
-│   │   ├── HistoryPage.tsx         # 탭 3 (월별 타임라인 + 최근 50건 점진적 로딩)
-│   │   ├── StatsPage.tsx           # 탭 4 (React.lazy 분리)
+│   │   ├── HistoryPage.tsx         # 탭 3 (월별 타임라인 + 평점순 정렬 + 최근 50건 점진적 로딩)
+│   │   ├── StatsPage.tsx           # 탭 4 (React.lazy 분리 + 음용 적기 현황 카드)
 │   │   ├── SettingsPage.tsx        # 설정/백업/임포트/로컬↔Drive 모드 전환
 │   │   └── OnboardingView.tsx      # 최초 실행 (Google Drive / 로컬 테스트 / JSON Import)
 │   ├── services/
 │   │   ├── auth/googleAuth.ts      # GIS OAuth 토큰 관리 (Lazy Auth, 1클릭 동기 재인증)
-│   │   ├── domain/wineHelpers.ts   # 4중 키 매칭, 3단계 산지 포맷, FIFO/빈티지 정렬
+│   │   ├── domain/wineHelpers.ts   # 4중 키 매칭, 3단계 산지 포맷, 음용 적기 판정, FIFO/빈티지 정렬
+│   │   ├── media/
+│   │   │   ├── imageProcessor.ts   # 브라우저 Canvas 리사이징 & WebP/JPEG 압축
+│   │   │   └── photoLoader.ts      # IndexedDB/Drive 사진 캐시 해석기 + usePhotoUrl 훅
 │   │   ├── storage/
-│   │   │   ├── types.ts            # StorageAdapter 인터페이스
-│   │   │   ├── googleDriveAdapter.ts # Drive API v3 CRUD, 낙관적 잠금, 백업
-│   │   │   ├── localOnlyAdapter.ts # IndexedDB 기반 로컬 테스트 어댑터
+│   │   │   ├── types.ts            # StorageAdapter 인터페이스 (DB + 백업 + 사진 CRUD)
+│   │   │   ├── googleDriveAdapter.ts # Drive API v3 CRUD, 낙관적 잠금, 백업, photos/ 업로드
+│   │   │   ├── localOnlyAdapter.ts # IndexedDB 기반 로컬 테스트 어댑터 (사진 Blob 포함)
 │   │   │   ├── syncEngine.ts       # Write Mutex 직렬화, 주간 자동 백업, pre_restore 복원
 │   │   │   ├── defaultTemplates.ts # 기본 선반 템플릿 & 데모 데이터
-│   │   │   └── localCache.ts       # IndexedDB 캐시 (idb, hasUnsyncedChanges 영속화)
-│   │   └── analytics/statsCalculator.ts # 순수 함수 통계 엔진 (230218 합산·3단계 산지 포함)
+│   │   │   └── localCache.ts       # IndexedDB v2 캐시 (appState, localBackups, photoCache)
+│   │   └── analytics/statsCalculator.ts # 순수 함수 통계 엔진 (230218 합산·3단계 산지·음용 적기 포함)
 │   ├── store/
-│   │   └── useWineStore.ts         # Zustand 전역 스토어 + 고아 마스터 정리/중복 병합
+│   │   └── useWineStore.ts         # Zustand 전역 스토어 + 고아 마스터 정리/중복 병합/사진 업로드
 │   ├── styles/
 │   │   └── tokens.css              # Light/Dark CSS 변수 + Wine Color 시맨틱 토큰
 │   ├── types/
@@ -288,7 +293,8 @@ wine-forest/
 │   ├── statsCalculator.test.ts     # 230218 통계, 3단계 산지, 평균가, 소비/선물 분리 검증
 │   ├── schemaValidation.test.ts    # Zod 스키마 및 FK 무결성 검증
 │   ├── syncConflict.test.ts        # Mock StorageAdapter 기반 충돌 감지·단건 메타 조회·주 1회 백업·안전 복원 검증
-│   └── wineStore.test.ts           # 4중 키 병합·고아 마스터 정리·선반 삭제 안전성·소비/복원 스토어 변이 검증
+│   ├── wineStore.test.ts           # 4중 키 병합·고아 마스터 정리·선반 이름/삭제·deviceLabel·소비/복원 검증
+│   └── phase2.test.tsx             # Phase 2 음용 적기·5점 별점/시음노트·프라이버시 2-A·이미지 리사이징 검증
 ├── docs/
 │   ├── SPEC_1_UI_ARCH.md           # 작업지시서 1부
 │   ├── SPEC_2_DATA_EXEC.md         # 작업지시서 2부
@@ -358,7 +364,7 @@ Antigravity(Gemini Neon)는 아래 **6개 마일스톤**을 순서대로 완료�
 
 ## 10. 최종 완료 기준 (Definition of Done — 검증 완료)
 
-- [x] `npm run test` 모든 단위 테스트(스키마, 230218 통계·3단계 산지, 충돌 감지·주 1회 백업, 프라이버시 마스킹, 스토어 도메인 변이) 100% 통과 (5 suites / 18 tests)
+- [x] `npm run test` 모든 단위 테스트(스키마, 230218 통계·3단계 산지, 충돌 감지·주 1회 백업, 프라이버시 마스킹, 스토어 도메인 변이, Phase 2 음용 적기·별점/시음노트·이미지 리사이징) 100% 통과 (6 suites / 24 tests)
 - [x] `npm run build` TypeScript/Vite 에러 및 경고 없이 완료, PWA 서비스워커(`dist/sw.js`) 정상 생성
 - [x] 모바일(`390×844`)과 데스크톱(`1440×900`) 양쪽에서 라이트/다크 모드 모두 대비·가독성 결함 없음 (화이트 연노랑 `#F3EED4`/`#EFEAD0` 다크 텍스트 대비 포함)
 - [x] 프라이버시 토글(`👁️`) ON 시 앱 내 모든 페이지·모달·외화 메모(`<FxNoteText />`)·비고/메모 원문(`<MemoText />`)·차트(가격대 분포 오버레이 포함)에서 금액 정보 100% 마스킹 확인

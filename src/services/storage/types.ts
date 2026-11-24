@@ -29,6 +29,9 @@ export interface StorageAdapter {
   createBackup(data: WineDatabase, fileName: string): Promise<BackupSnapshot>;
   listBackups(): Promise<BackupSnapshot[]>;
   loadBackup(fileId: string): Promise<WineDatabase>;
+  uploadPhoto(blob: Blob, fileName: string): Promise<{ fileId: string }>;
+  downloadPhoto(fileId: string): Promise<Blob>;
+  deletePhoto(fileId: string): Promise<void>;
 }
 
 export class ConflictError extends Error {

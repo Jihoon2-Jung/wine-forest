@@ -20,6 +20,13 @@ export interface LocalBackupRecord {
   data: WineDatabase;
 }
 
+export interface CachedPhotoRecord {
+  fileId: string;
+  blob: Blob;
+  mimeType: string;
+  cachedAt: string;
+}
+
 interface WineForestIdbSchema extends DBSchema {
   appState: {
     key: 'singleton';
@@ -29,10 +36,14 @@ interface WineForestIdbSchema extends DBSchema {
     key: string;
     value: LocalBackupRecord;
   };
+  photoCache: {
+    key: string;
+    value: CachedPhotoRecord;
+  };
 }
 
 const DB_NAME = 'jh-wine-forest-idb';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 
 let dbPromise: Promise<IDBPDatabase<WineForestIdbSchema>> | null = null;
 
@@ -45,6 +56,9 @@ function getDb(): Promise<IDBPDatabase<WineForestIdbSchema>> {
         }
         if (!db.objectStoreNames.contains('localBackups')) {
           db.createObjectStore('localBackups', { keyPath: 'fileId' });
+        }
+        if (!db.objectStoreNames.contains('photoCache')) {
+          db.createObjectStore('photoCache', { keyPath: 'fileId' });
         }
       },
     });
@@ -100,4 +114,37 @@ export async function loadLocalBackup(fileId: string): Promise<WineDatabase | nu
   const db = await getDb();
   const record = await db.get('localBackups', fileId);
   return record?.data ?? null;
+}
+
+export async function getCachedPhoto(fileId: string): Promise<Blob | null> {
+  try {
+    const db = await getDb();
+    const record = await db.get('photoCache', fileId);
+    return record?.blob ?? null;
+  } catch {
+    return null;
+  }
+}
+
+export async function putCachedPhoto(fileId: string, blob: Blob): Promise<void> {
+  try {
+    const db = await getDb();
+    await db.put('photoCache', {
+      fileId,
+      blob,
+      mimeType: blob.type || 'image/webp',
+      cachedAt: new Date().toISOString(),
+    });
+  } catch {
+    // ignore storage quota errors
+  }
+}
+
+export async function deleteCachedPhoto(fileId: string): Promise<void> {
+  try {
+    const db = await getDb();
+    await db.delete('photoCache', fileId);
+  } catch {
+    // ignore cache deletion errors
+  }
 }

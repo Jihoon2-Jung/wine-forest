@@ -2,7 +2,7 @@ import { LayoutGrid, List, Plus, Wine } from 'lucide-react';
 import { useDeferredValue, useMemo, useState } from 'react';
 import type { BottleInstance } from '@/types/schema';
 import { calculateWineGroupPrice } from '@/services/analytics/statsCalculator';
-import { compareVintage } from '@/services/domain/wineHelpers';
+import { compareVintage, getDrinkingWindowStatus } from '@/services/domain/wineHelpers';
 import { useWineStore } from '@/store/useWineStore';
 import { PriceText } from '@/components/common/PriceText';
 import { FilterBar } from '@/components/wines/FilterBar';
@@ -58,6 +58,14 @@ export function InventoryPage() {
       if (filters.country && wine.country !== filters.country) continue;
       if (filters.region && wine.region !== filters.region) continue;
       if (filters.subRegion && wine.subRegion !== filters.subRegion) continue;
+      if (filters.drinkingWindow) {
+        const dwStatus = getDrinkingWindowStatus(wine);
+        if (filters.drinkingWindow === 'ready_now') {
+          if (dwStatus !== 'ready' && dwStatus !== 'closing_soon') continue;
+        } else if (dwStatus !== filters.drinkingWindow) {
+          continue;
+        }
+      }
 
       // 통합 검색 (와인명, 생산자, 국가, 지역, 세부지역, 빈티지, 구매처, 보관 위치, 메모)
       if (deferredQuery) {

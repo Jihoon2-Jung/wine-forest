@@ -16,13 +16,15 @@ export function HistoryPage() {
   const db = useWineStore((s) => s.db);
   const [typeFilter, setTypeFilter] = useState<'ALL' | 'CONSUMED' | 'GIFTED'>('ALL');
   const [yearFilter, setYearFilter] = useState<string>('ALL');
+  const [ratingFilter, setRatingFilter] = useState<'ALL' | 'RATED' | '4.0' | '4.5'>('ALL');
+  const [sortBy, setSortBy] = useState<'date_desc' | 'rating_desc'>('date_desc');
   const [query, setQuery] = useState('');
   const [visibleLimit, setVisibleLimit] = useState(PAGE_SIZE);
   const deferredQuery = useDeferredValue(query.trim().toLowerCase());
 
   useEffect(() => {
     setVisibleLimit(PAGE_SIZE);
-  }, [typeFilter, yearFilter, deferredQuery]);
+  }, [typeFilter, yearFilter, ratingFilter, sortBy, deferredQuery]);
 
   const { years, groupedTimeline, totalCount, displayedCount, sortedLocations } = useMemo(() => {
     if (!db) {
@@ -60,15 +62,26 @@ export function HistoryPage() {
           return false;
         }
       }
+      if (ratingFilter !== 'ALL') {
+        const r = tasting.rating;
+        if (r === null || r === undefined) return false;
+        if (ratingFilter === '4.5' && r < 4.5) return false;
+        if (ratingFilter === '4.0' && r < 4.0) return false;
+      }
       if (deferredQuery) {
         const hay =
-          `${wine.name} ${wine.country} ${wine.region} ${wine.subRegion ?? ''} ${wine.vintage} ${tasting.occasion ?? ''} ${tasting.memo ?? ''}`.toLowerCase();
+          `${wine.name} ${wine.country} ${wine.region} ${wine.subRegion ?? ''} ${wine.vintage} ${tasting.occasion ?? ''} ${tasting.companions ?? ''} ${tasting.tastingNote ?? ''} ${tasting.memo ?? ''}`.toLowerCase();
         if (!hay.includes(deferredQuery)) return false;
       }
       return true;
     });
 
     filtered.sort((a, b) => {
+      if (sortBy === 'rating_desc') {
+        const ra = a.tasting.rating ?? -1;
+        const rb = b.tasting.rating ?? -1;
+        if (ra !== rb) return rb - ra;
+      }
       const da = a.tasting.eventDate ?? '0000-00-00';
       const dbDate = b.tasting.eventDate ?? '0000-00-00';
       if (da !== dbDate) return dbDate.localeCompare(da);
@@ -76,6 +89,20 @@ export function HistoryPage() {
     });
 
     const sliced = filtered.slice(0, visibleLimit);
+
+    // 평점순 정렬 시 단일 랭킹 그룹, 날짜순 정렬 시 월별 그룹('날짜 미상' 최하단)
+    if (sortBy === 'rating_desc') {
+      return {
+        years: [...yearSet].sort((a, b) => b.localeCompare(a)),
+        groupedTimeline:
+          sliced.length > 0
+            ? [{ monthKey: 'BY_RATING', label: '평점 높은순', items: sliced }]
+            : [],
+        totalCount: filtered.length,
+        displayedCount: sliced.length,
+        sortedLocations: [...db.locations].sort((a, b) => a.sortOrder - b.sortOrder),
+      };
+    }
 
     // M4 보강: eventDate === null은 최하단 '날짜 미상' 그룹으로 분리
     const groupsMap = new Map<string, EnrichedHistoryItem[]>();
@@ -107,7 +134,7 @@ export function HistoryPage() {
       displayedCount: sliced.length,
       sortedLocations: [...db.locations].sort((a, b) => a.sortOrder - b.sortOrder),
     };
-  }, [db, typeFilter, yearFilter, deferredQuery, visibleLimit]);
+  }, [db, typeFilter, yearFilter, ratingFilter, sortBy, deferredQuery, visibleLimit]);
 
   if (!db) return null;
 
@@ -152,7 +179,7 @@ export function HistoryPage() {
               type="search"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              placeholder="와인명, 모임명, 메모 검색..."
+              placeholder="와인명, 모임, 동반자, 시음노트, 메모 검색..."
               className="w-full rounded-xl border border-subtle bg-elevated py-2 pl-9 pr-3 text-xs text-primary focus:border-forest focus:outline-none"
             />
           </div>
@@ -170,6 +197,32 @@ export function HistoryPage() {
               </option>
             ))}
             <option value="UNKNOWN">날짜 미상</option>
+          </select>
+
+          <select
+            aria-label="평점 필터"
+            value={ratingFilter}
+            onChange={(e) => setRatingFilter(e.target.value as 'ALL' | 'RATED' | '4.0' | '4.5')}
+            className={`rounded-xl border px-3 py-2 text-xs font-semibold focus:border-forest focus:outline-none ${
+              ratingFilter !== 'ALL'
+                ? 'border-gold bg-gold/10 text-gold'
+                : 'border-subtle bg-elevated text-primary'
+            }`}
+          >
+            <option value="ALL">평점: 전체</option>
+            <option value="4.5">★ 4.5 이상</option>
+            <option value="4.0">★ 4.0 이상</option>
+            <option value="RATED">평점 기록됨</option>
+          </select>
+
+          <select
+            aria-label="이력 정렬"
+            value={sortBy}
+            onChange={(e) => setSortBy(e.target.value as 'date_desc' | 'rating_desc')}
+            className="rounded-xl border border-subtle bg-elevated px-3 py-2 text-xs font-semibold text-primary focus:border-forest focus:outline-none"
+          >
+            <option value="date_desc">최신순</option>
+            <option value="rating_desc">평점 높은순</option>
           </select>
         </div>
       </div>

@@ -39,3 +39,13 @@ migration_review*.md
 .env
 .env.local
 .env.*.local
+
+# Mobile Native Secrets & Signing Artifacts (Public Repo Guardrail)
+ios/App/Config/Local.xcconfig
+*.keystore
+*.jks
+keystore.properties
+*.p12
+*.mobileprovision
+GoogleService-Info.plist
+google-services.json

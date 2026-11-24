@@ -67,6 +67,9 @@ function createMockAdapter(initialDb: WineDatabase, initialModifiedTime: string)
       if (!found) throw new Error('backup not found');
       return structuredClone(found.data);
     }),
+    uploadPhoto: vi.fn(async () => ({ fileId: 'mock-photo-1' })),
+    downloadPhoto: vi.fn(async () => new Blob(['img'], { type: 'image/webp' })),
+    deletePhoto: vi.fn(async () => undefined),
   };
 
   return adapter;

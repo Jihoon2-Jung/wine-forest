@@ -1,7 +1,13 @@
 import { MapPin, Wine } from 'lucide-react';
 import type { BottleInstance, WineMaster } from '@/types/schema';
 import { calculateWineGroupPrice } from '@/services/analytics/statsCalculator';
-import { formatBottleSizeBadge, formatWineOrigin } from '@/services/domain/wineHelpers';
+import {
+  DRINKING_WINDOW_BADGE_META,
+  formatBottleSizeBadge,
+  formatDrinkingWindowRange,
+  formatWineOrigin,
+  getDrinkingWindowStatus,
+} from '@/services/domain/wineHelpers';
 import { useWineStore } from '@/store/useWineStore';
 import { PriceText } from '@/components/common/PriceText';
 import { WineColorBadge } from '@/components/common/WineColorBadge';
@@ -35,6 +41,9 @@ export function WineGroupCard({
     count > 0 ? inStockBottles : group.allBottles,
   );
   const sizeBadge = formatBottleSizeBadge(wine.bottleSizeMl);
+  const dwStatus = getDrinkingWindowStatus(wine);
+  const dwRange = formatDrinkingWindowRange(wine);
+  const dwMeta = dwStatus !== 'unset' ? DRINKING_WINDOW_BADGE_META[dwStatus] : null;
 
   if (compact) {
     return (
@@ -137,6 +146,15 @@ export function WineGroupCard({
             {sizeBadge && (
               <span className="rounded bg-elevated px-1.5 py-0.5 text-[10px] font-semibold text-secondary">
                 {sizeBadge}
+              </span>
+            )}
+            {dwMeta && (
+              <span
+                className={`rounded border px-1.5 py-0.5 text-[10px] font-bold tabular-nums ${dwMeta.className}`}
+                title={dwRange ? `음용 적기: ${dwRange}` : dwMeta.label}
+              >
+                {dwMeta.shortLabel}
+                {dwRange ? ` ${dwRange}` : ''}
               </span>
             )}
           </div>

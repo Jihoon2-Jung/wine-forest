@@ -1,7 +1,11 @@
-import { RotateCcw, Search, SlidersHorizontal, X } from 'lucide-react';
+import { Clock, RotateCcw, Search, SlidersHorizontal, X } from 'lucide-react';
 import { useMemo } from 'react';
 import { WINE_COLORS, WINE_COLOR_LABELS, type WineColor } from '@/types/schema';
-import { useWineStore, type InventorySortKey } from '@/store/useWineStore';
+import {
+  useWineStore,
+  type DrinkingWindowFilter,
+  type InventorySortKey,
+} from '@/store/useWineStore';
 import {
   getWineColorBorderCssVar,
   getWineColorCssVar,
@@ -90,6 +94,7 @@ export function FilterBar() {
     Boolean(filters.region) ||
     Boolean(filters.subRegion) ||
     Boolean(filters.zone) ||
+    Boolean(filters.drinkingWindow) ||
     filters.includeOutOfStock;
 
   return (
@@ -248,6 +253,42 @@ export function FilterBar() {
           ))}
           <option value="__UNASSIGNED__">미지정</option>
         </select>
+
+        {/* Phase 2-1: 음용 적기 필터 */}
+        <select
+          aria-label="음용 적기 필터"
+          value={filters.drinkingWindow}
+          onChange={(e) => setFilters({ drinkingWindow: e.target.value as DrinkingWindowFilter })}
+          className={`rounded-xl border px-3 py-1.5 text-xs font-semibold focus:border-forest focus:outline-none ${
+            filters.drinkingWindow
+              ? 'border-forest bg-forest/10 text-forest'
+              : 'border-subtle bg-surface text-primary'
+          }`}
+        >
+          <option value="">음용 적기: 전체</option>
+          <option value="ready_now">지금 마시기 좋은 와인</option>
+          <option value="closing_soon">마감 임박 (올해~내년)</option>
+          <option value="past_peak">적기 경과</option>
+          <option value="too_young">숙성 중</option>
+        </select>
+
+        <button
+          type="button"
+          onClick={() =>
+            setFilters({
+              drinkingWindow: filters.drinkingWindow === 'ready_now' ? '' : 'ready_now',
+            })
+          }
+          className={`inline-flex items-center gap-1 rounded-xl border px-2.5 py-1.5 text-xs font-bold transition-colors ${
+            filters.drinkingWindow === 'ready_now'
+              ? 'border-[var(--status-ok)] bg-[var(--status-ok)]/15 text-[var(--status-ok)]'
+              : 'border-subtle bg-surface text-secondary hover:border-forest hover:text-forest'
+          }`}
+          title="지금 마시기 좋은 와인만 모아보기"
+        >
+          <Clock className="h-3.5 w-3.5" />
+          <span>지금 적기</span>
+        </button>
 
         {/* 정렬 */}
         <div className="ml-auto flex items-center gap-1.5">

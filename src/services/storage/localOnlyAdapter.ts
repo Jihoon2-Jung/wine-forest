@@ -1,9 +1,12 @@
 import type { WineDatabase } from '@/types/schema';
 import { parseWineDatabase } from '@/types/validation';
 import {
+  deleteCachedPhoto,
+  getCachedPhoto,
   listLocalBackups,
   loadCachedState,
   loadLocalBackup,
+  putCachedPhoto,
   saveLocalBackup,
 } from './localCache';
 import {
@@ -111,5 +114,23 @@ export class LocalOnlyAdapter implements StorageAdapter {
       throw new Error('선택한 로컬 백업 파일을 찾을 수 없습니다.');
     }
     return parseWineDatabase(data);
+  }
+
+  async uploadPhoto(blob: Blob, _fileName: string): Promise<{ fileId: string }> {
+    const fileId = `local_photo_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+    await putCachedPhoto(fileId, blob);
+    return { fileId };
+  }
+
+  async downloadPhoto(fileId: string): Promise<Blob> {
+    const blob = await getCachedPhoto(fileId);
+    if (!blob) {
+      throw new Error('로컬 저장소에서 사진을 찾을 수 없습니다.');
+    }
+    return blob;
+  }
+
+  async deletePhoto(fileId: string): Promise<void> {
+    await deleteCachedPhoto(fileId);
   }
 }

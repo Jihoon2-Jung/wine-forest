@@ -1,5 +1,6 @@
-import { ArrowDown, ArrowUp, Plus, Trash2 } from 'lucide-react';
+import { ArrowDown, ArrowUp, Check, Pencil, Plus, Trash2, X } from 'lucide-react';
 import { useMemo, useState } from 'react';
+import type { CellarLocation } from '@/types/schema';
 import { useWineStore } from '@/store/useWineStore';
 import { BottomSheet } from '@/components/common/BottomSheet';
 
@@ -17,6 +18,12 @@ export function ShelfConfigModal({ open, onClose }: ShelfConfigModalProps) {
   const [zone, setZone] = useState('삼성');
   const [shelf, setShelf] = useState('');
   const [maxCapacity, setMaxCapacity] = useState('8');
+
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editZone, setEditZone] = useState('');
+  const [editShelf, setEditShelf] = useState('');
+  const [editDisplayName, setEditDisplayName] = useState('');
+  const [displayNameEdited, setDisplayNameEdited] = useState(false);
 
   const { sortedLocations, inStockCountMap } = useMemo(() => {
     if (!db) return { sortedLocations: [], inStockCountMap: new Map<string, number>() };
@@ -58,6 +65,27 @@ export function ShelfConfigModal({ open, onClose }: ShelfConfigModalProps) {
     const swap = sortedLocations[targetIdx];
     await updateLocation(current.id, { sortOrder: swap.sortOrder });
     await updateLocation(swap.id, { sortOrder: current.sortOrder });
+  };
+
+  const startRename = (loc: CellarLocation) => {
+    setEditingId(loc.id);
+    setEditZone(loc.zone);
+    setEditShelf(loc.shelf);
+    setEditDisplayName(loc.displayName);
+    setDisplayNameEdited(false);
+  };
+
+  const handleSaveRename = async (locId: string) => {
+    const z = editZone.trim();
+    const s = editShelf.trim() || '기본';
+    if (!z) return;
+    const display = editDisplayName.trim() || (s === '기본' ? z : `${z} ${s}`);
+    await updateLocation(locId, {
+      zone: z,
+      shelf: s,
+      displayName: display,
+    });
+    setEditingId(null);
   };
 
   return (
@@ -109,68 +137,145 @@ export function ShelfConfigModal({ open, onClose }: ShelfConfigModalProps) {
         <div className="space-y-2">
           {sortedLocations.map((loc, idx) => {
             const count = inStockCountMap.get(loc.id) ?? 0;
+            const isEditing = editingId === loc.id;
             return (
               <div
                 key={loc.id}
-                className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-subtle bg-surface px-3 py-2.5 text-xs"
+                className="space-y-2 rounded-xl border border-subtle bg-surface px-3 py-2.5 text-xs"
               >
-                <div className="flex items-center gap-2">
-                  <div className="flex flex-col">
-                    <button
-                      type="button"
-                      disabled={idx === 0}
-                      onClick={() => void handleMoveOrder(idx, -1)}
-                      className="text-secondary hover:text-primary disabled:opacity-30"
-                      aria-label="위로 이동"
-                    >
-                      <ArrowUp className="h-3.5 w-3.5" />
-                    </button>
-                    <button
-                      type="button"
-                      disabled={idx === sortedLocations.length - 1}
-                      onClick={() => void handleMoveOrder(idx, 1)}
-                      className="text-secondary hover:text-primary disabled:opacity-30"
-                      aria-label="아래로 이동"
-                    >
-                      <ArrowDown className="h-3.5 w-3.5" />
-                    </button>
-                  </div>
-                  <div>
-                    <div className="font-bold text-primary">{loc.displayName}</div>
-                    <div className="text-[11px] text-secondary tabular-nums">
-                      구역: {loc.zone} · 현재 {count}병
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="flex items-center gap-2">
+                    <div className="flex flex-col">
+                      <button
+                        type="button"
+                        disabled={idx === 0}
+                        onClick={() => void handleMoveOrder(idx, -1)}
+                        className="text-secondary hover:text-primary disabled:opacity-30"
+                        aria-label="위로 이동"
+                      >
+                        <ArrowUp className="h-3.5 w-3.5" />
+                      </button>
+                      <button
+                        type="button"
+                        disabled={idx === sortedLocations.length - 1}
+                        onClick={() => void handleMoveOrder(idx, 1)}
+                        className="text-secondary hover:text-primary disabled:opacity-30"
+                        aria-label="아래로 이동"
+                      >
+                        <ArrowDown className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
+                    <div>
+                      <div className="font-bold text-primary">{loc.displayName}</div>
+                      <div className="text-[11px] text-secondary tabular-nums">
+                        보관처: {loc.zone} · 선반: {loc.shelf} · 현재 {count}병
+                      </div>
                     </div>
                   </div>
+
+                  <div className="flex items-center gap-1.5">
+                    <label className="flex items-center gap-1 text-[11px] text-secondary">
+                      <span>정원</span>
+                      <input
+                        type="number"
+                        min={0}
+                        defaultValue={loc.maxCapacity}
+                        onBlur={(e) => {
+                          const val = Math.max(0, Number(e.target.value) || 0);
+                          if (val !== loc.maxCapacity) {
+                            void updateLocation(loc.id, { maxCapacity: val });
+                          }
+                        }}
+                        className="w-16 rounded-lg border border-subtle bg-elevated px-2 py-1 text-right text-xs font-bold tabular-nums text-primary"
+                      />
+                    </label>
+
+                    <button
+                      type="button"
+                      onClick={() => (isEditing ? setEditingId(null) : startRename(loc))}
+                      className="rounded-lg border border-subtle p-1.5 text-secondary hover:border-forest hover:text-forest"
+                      title="선반 이름 수정"
+                      aria-label="선반 이름 수정"
+                    >
+                      <Pencil className="h-3.5 w-3.5" />
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => void deleteLocation(loc.id)}
+                      disabled={count > 0}
+                      className="rounded-lg border border-subtle p-1.5 text-secondary hover:border-[var(--status-danger)] hover:text-[var(--status-danger)] disabled:cursor-not-allowed disabled:opacity-35"
+                      title={count > 0 ? '보유 병이 있어 삭제 불가' : '선반 삭제'}
+                      aria-label="선반 삭제"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
                 </div>
 
-                <div className="flex items-center gap-2">
-                  <label className="flex items-center gap-1 text-[11px] text-secondary">
-                    <span>정원</span>
+                {isEditing && (
+                  <div className="grid grid-cols-1 gap-2 border-t border-subtle pt-2.5 sm:grid-cols-12">
                     <input
-                      type="number"
-                      min={0}
-                      defaultValue={loc.maxCapacity}
-                      onBlur={(e) => {
-                        const val = Math.max(0, Number(e.target.value) || 0);
-                        if (val !== loc.maxCapacity) {
-                          void updateLocation(loc.id, { maxCapacity: val });
+                      type="text"
+                      value={editZone}
+                      onChange={(e) => {
+                        const nextZ = e.target.value;
+                        setEditZone(nextZ);
+                        if (!displayNameEdited) {
+                          const s = editShelf.trim() || '기본';
+                          setEditDisplayName(s === '기본' ? nextZ.trim() : `${nextZ.trim()} ${s}`);
                         }
                       }}
-                      className="w-16 rounded-lg border border-subtle bg-elevated px-2 py-1 text-right text-xs font-bold tabular-nums text-primary"
+                      placeholder="보관처 (예: 삼성, LG)"
+                      aria-label="보관처 이름"
+                      className="rounded-lg border border-subtle bg-elevated px-2.5 py-1.5 text-xs text-primary sm:col-span-3"
                     />
-                  </label>
-
-                  <button
-                    type="button"
-                    onClick={() => void deleteLocation(loc.id)}
-                    disabled={count > 0}
-                    className="rounded-lg border border-subtle p-1.5 text-secondary hover:border-[var(--status-danger)] hover:text-[var(--status-danger)] disabled:cursor-not-allowed disabled:opacity-35"
-                    title={count > 0 ? '보유 병이 있어 삭제 불가' : '선반 삭제'}
-                    aria-label="선반 삭제"
-                  >
-                    <Trash2 className="h-3.5 w-3.5" />
-                  </button>
-                </div>
+                    <input
+                      type="text"
+                      value={editShelf}
+                      onChange={(e) => {
+                        const nextS = e.target.value;
+                        setEditShelf(nextS);
+                        if (!displayNameEdited) {
+                          const s = nextS.trim() || '기본';
+                          setEditDisplayName(s === '기본' ? editZone.trim() : `${editZone.trim()} ${s}`);
+                        }
+                      }}
+                      placeholder="선반 (예: 1-1, 기본)"
+                      aria-label="선반 번호"
+                      className="rounded-lg border border-subtle bg-elevated px-2.5 py-1.5 text-xs text-primary sm:col-span-3"
+                    />
+                    <input
+                      type="text"
+                      value={editDisplayName}
+                      onChange={(e) => {
+                        setEditDisplayName(e.target.value);
+                        setDisplayNameEdited(true);
+                      }}
+                      placeholder="표시명 (예: 삼성 1-1)"
+                      aria-label="선반 표시명"
+                      className="rounded-lg border border-subtle bg-elevated px-2.5 py-1.5 text-xs font-semibold text-primary sm:col-span-4"
+                    />
+                    <div className="flex items-center justify-end gap-1 sm:col-span-2">
+                      <button
+                        type="button"
+                        onClick={() => setEditingId(null)}
+                        className="rounded-lg border border-subtle bg-elevated p-1.5 text-secondary hover:text-primary"
+                        aria-label="취소"
+                      >
+                        <X className="h-3.5 w-3.5" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => void handleSaveRename(loc.id)}
+                        className="rounded-lg bg-forest p-1.5 text-white hover:bg-forest-hover"
+                        aria-label="이름 저장"
+                      >
+                        <Check className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
             );
           })}
