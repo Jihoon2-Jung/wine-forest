@@ -322,6 +322,48 @@ describe('Phase 2-3A — Image Scaling & Unified Photo Picker', () => {
         .getState()
         .db!.wines.find((w) => w.name === baseWine.name && w.vintage === '2024')!;
       expect(newVintageWine.labelImageFileId).toBe(updatedBase.labelImageFileId);
+
+      // 동일 번들 재업로드: overwriteExisting=false 시 기존 라벨 건너뛰기(파일 ID 유지), true 시 새 파일로 교체
+      const firstFileId = updatedBase.labelImageFileId;
+      const skipRes = await useWineStore.getState().importApprovedLabelsBundle(
+        {
+          schemaVersion: 1,
+          items: [
+            {
+              wineId: baseWine.id,
+              wineIds: [baseWine.id, siblingWine.id],
+              wineName: baseWine.name,
+              color: baseWine.color,
+              dataUrl: sampleDataUrl,
+            },
+          ],
+        },
+        { overwriteExisting: false },
+      );
+      expect(skipRes).toEqual({ applied: 0, skipped: 1, failed: 0 });
+      expect(useWineStore.getState().db!.wines.find((w) => w.id === baseWine.id)!.labelImageFileId).toBe(
+        firstFileId,
+      );
+
+      const overwriteRes = await useWineStore.getState().importApprovedLabelsBundle(
+        {
+          schemaVersion: 1,
+          items: [
+            {
+              wineId: baseWine.id,
+              wineIds: [baseWine.id, siblingWine.id],
+              wineName: baseWine.name,
+              color: baseWine.color,
+              dataUrl: sampleDataUrl,
+            },
+          ],
+        },
+        { overwriteExisting: true },
+      );
+      expect(overwriteRes).toEqual({ applied: 3, skipped: 0, failed: 0 });
+      expect(
+        useWineStore.getState().db!.wines.find((w) => w.id === baseWine.id)!.labelImageFileId,
+      ).not.toBe(firstFileId);
     } finally {
       URL.createObjectURL = origCreate;
       URL.revokeObjectURL = origRevoke;

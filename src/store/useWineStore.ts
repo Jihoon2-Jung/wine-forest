@@ -289,6 +289,7 @@ interface WineStoreState {
   deleteTastingPhotoFile: (fileId: string) => Promise<void>;
   importApprovedLabelsBundle: (
     raw: unknown,
+    options?: { overwriteExisting?: boolean },
   ) => Promise<{ applied: number; skipped: number; failed: number }>;
 
   // UI Actions
@@ -1544,7 +1545,8 @@ export const useWineStore = create<WineStoreState>((set, get) => {
       void evictPhotoFromCache(fileId);
     },
 
-    importApprovedLabelsBundle: async (raw) => {
+    importApprovedLabelsBundle: async (raw, options) => {
+      const overwriteExisting = options?.overwriteExisting ?? false;
       const state = get();
       const db = state.db;
       if (!db) return { applied: 0, skipped: 0, failed: 0 };
@@ -1599,7 +1601,11 @@ export const useWineStore = create<WineStoreState>((set, get) => {
             }
           }
 
-          if (matchedWines.size === 0) {
+          const targetsToUpdate = overwriteExisting
+            ? [...matchedWines.values()]
+            : [...matchedWines.values()].filter((w) => !w.labelImageFileId);
+
+          if (targetsToUpdate.length === 0) {
             skipped += 1;
             continue;
           }
@@ -1609,7 +1615,7 @@ export const useWineStore = create<WineStoreState>((set, get) => {
             const fileName = `label_${item.wineId.slice(0, 8)}_${Date.now()}_${idx}.${extension}`;
             const { fileId } = await adapter.uploadPhoto(blob, fileName);
             await registerUploadedPhotoBlob(fileId, blob);
-            for (const targetWine of matchedWines.values()) {
+            for (const targetWine of targetsToUpdate) {
               if (targetWine.labelImageFileId && targetWine.labelImageFileId !== fileId) {
                 oldFileIdsToDelete.add(targetWine.labelImageFileId);
               }
@@ -1630,7 +1636,7 @@ export const useWineStore = create<WineStoreState>((set, get) => {
           });
           const summaryMsg =
             `승인된 라벨을 ${applied}개 와인(전체 빈티지 포함)에 일괄 적용했습니다.` +
-            (skipped > 0 ? ` (미일치 ${skipped}건 제외)` : '') +
+            (skipped > 0 ? ` (기존/미일치 ${skipped}건 건너뜀)` : '') +
             (failed > 0 ? ` (실패 ${failed}건)` : '');
           await commitMutation({ ...latestDb, wines: nextWines }, summaryMsg);
 
@@ -1645,8 +1651,8 @@ export const useWineStore = create<WineStoreState>((set, get) => {
           }
         } else {
           get().showToast(
-            `적용된 라벨이 없습니다. (미일치 ${skipped}건 · 실패 ${failed}건)`,
-            'warning',
+            `새로 적용된 라벨이 없습니다. (기존/미일치 ${skipped}건 건너뜀${failed > 0 ? ` · 실패 ${failed}건` : ''})`,
+            'info',
           );
         }
 

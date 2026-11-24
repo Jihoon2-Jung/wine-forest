@@ -17,6 +17,8 @@ import {
   UploadCloud,
 } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
+import { parseApprovedLabelsBundle } from '@/types/validation';
+import { buildWineLabelGroupKey } from '@/services/domain/wineHelpers';
 import { hasGoogleClientId, isTokenValid } from '@/services/auth/googleAuth';
 import { useWineStore } from '@/store/useWineStore';
 import { BottomSheet } from '@/components/common/BottomSheet';
@@ -91,7 +93,42 @@ export function SettingsPage() {
     try {
       const text = await file.text();
       const parsed = JSON.parse(text) as unknown;
-      await importApprovedLabelsBundle(parsed);
+      const bundle = parseApprovedLabelsBundle(parsed);
+
+      // 이미 라벨이 등록된 와인이 포함되어 있는지 사전 확인
+      const wineById = new Map(db.wines.map((w) => [w.id, w]));
+      const hasLabelByGroup = new Set(
+        db.wines.filter((w) => Boolean(w.labelImageFileId)).map((w) => buildWineLabelGroupKey(w)),
+      );
+      let existingOverlapCount = 0;
+      for (const item of bundle.items) {
+        const ids = item.wineIds && item.wineIds.length > 0 ? item.wineIds : [item.wineId];
+        const matchedExisting = ids.some((id) => {
+          const w = wineById.get(id);
+          return Boolean(w && (w.labelImageFileId || hasLabelByGroup.has(buildWineLabelGroupKey(w))));
+        });
+        const matchedByName =
+          !matchedExisting &&
+          Boolean(
+            item.wineName &&
+              item.color &&
+              hasLabelByGroup.has(buildWineLabelGroupKey({ name: item.wineName, color: item.color })),
+          );
+        if (matchedExisting || matchedByName) {
+          existingOverlapCount += 1;
+        }
+      }
+
+      let overwriteExisting = false;
+      if (existingOverlapCount > 0) {
+        overwriteExisting = window.confirm(
+          `업로드한 파일에 이미 라벨이 등록된 와인 ${existingOverlapCount}건이 포함되어 있습니다.\n\n` +
+            `[확인] 이미 등록된 라벨도 새 이미지로 덮어쓰기 (기존 파일 자동 삭제)\n` +
+            `[취소] 라벨이 없는 와인만 새로 적용 (기존 ${existingOverlapCount}건 건너뛰기)`,
+        );
+      }
+
+      await importApprovedLabelsBundle(bundle, { overwriteExisting });
     } catch (err) {
       const msg = err instanceof Error ? err.message : '유효하지 않은 승인 라벨 번들 형식입니다.';
       showToast(`라벨 일괄 적용 실패: ${msg}`, 'error');
