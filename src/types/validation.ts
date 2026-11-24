@@ -121,3 +121,27 @@ export function parseWineDatabase(input: unknown): WineDatabase {
 export function safeParseWineDatabase(input: unknown) {
   return wineDatabaseSchema.safeParse(input);
 }
+
+export const approvedLabelItemSchema = z.object({
+  wineId: z.string().min(1),
+  wineIds: z.array(z.string().min(1)).optional(),
+  wineName: z.string().optional(),
+  color: wineColorSchema.optional(),
+  vintage: z.string().optional(),
+  mimeType: z.string().optional(),
+  dataUrl: z
+    .string()
+    .refine((v) => v.startsWith('data:image/') && v.includes(';base64,'), '유효한 이미지 Data URL이어야 합니다'),
+});
+
+export const approvedLabelsBundleSchema = z.object({
+  schemaVersion: z.literal(1),
+  generatedAt: z.string().optional(),
+  items: z.array(approvedLabelItemSchema).min(1, '적용할 승인 라벨 항목이 1개 이상 필요합니다'),
+});
+
+export type ApprovedLabelsBundle = z.infer<typeof approvedLabelsBundleSchema>;
+
+export function parseApprovedLabelsBundle(input: unknown): ApprovedLabelsBundle {
+  return approvedLabelsBundleSchema.parse(input);
+}

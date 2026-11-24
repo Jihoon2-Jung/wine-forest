@@ -226,9 +226,9 @@ python3 local_migration_script \
    * `WineMaster.drinkingWindowStart`, `drinkingWindowEnd` 입력·편집, 4단계 상태 판정(`숙성 중`/`지금 적기`/`마감 임박`/`적기 경과`), 목록 배지·필터, 통계 대시보드 드릴다운 카드 구현.
 2. **구조화된 시음노트 & 5.0 별점 (Phase 2-2 — 구현 완료):**
    * `TastingRecord`의 `rating`(5.0 만점, 0.5 단위), `tastingNote`, `companions` 입력·인라인 편집, 평점순 정렬/필터, 상세 시트 평균 별점 구현. (프라이버시 모드 ON 시에도 `tastingNote`·`companions`·`rating`은 표시, 기존 `memo`만 마스킹)
-3. **미디어 파이프라인 — 라벨 & 시음 사진 (Phase 2-3A — 구현 완료):**
-   * 클라이언트 Canvas 자동 압축(`imageProcessor.ts`: 라벨 500px / 시음 1024px WebP, JPEG 폴백), Drive `JH_Wine_Forest/photos/` + `LocalOnlyAdapter` IndexedDB `photoCache`(DB v2) 오프라인 캐시, `<WineThumbnail />` 실이미지, 라벨 등록/교체/삭제, 시음 사진(최대 3장) 첨부 및 `PhotoLightbox` 확대 뷰어 구현.
-   * **추후 확장(Phase 2-3B):** 기존 대량 와인 라벨 일괄 검색·사용자 컨펌용 PC 보조 파이프라인은 사용자 요청 시 별도 진행.
+3. **미디어 파이프라인 — 라벨 & 시음 사진 (Phase 2-3A & 2-3B — 구현 완료):**
+   * **2-3A (앱 내 촬영/업로드):** 클라이언트 Canvas 자동 압축(`imageProcessor.ts`: 라벨 500px / 시음 1024px WebP, JPEG 폴백), Drive `JH_Wine_Forest/photos/` + `LocalOnlyAdapter` IndexedDB `photoCache`(DB v2) 오프라인 캐시, `<WineThumbnail />` 실이미지, 라벨 등록/교체/삭제, 시음 사진(최대 3장) 첨부 및 `PhotoLightbox` 확대 뷰어 구현.
+   * **2-3B (기존 와인 라벨 일괄 검색·사용자 컨펌 도구):** `scripts/label_review_tool.py`로 **빈티지 구분 없이 `(와인명, 색상)` 단위로 통합**해 공개 API(Open Food Facts / Wikimedia Commons, 선택: `--local-dir`, `--google-cse-key`/`--google-cse-cx`, `--serpapi-key`) 후보 탐색 + 브라우저 검수 HTML(`label_review.html`: 후보 선택, 클립보드 `Cmd+V`, 드래그&드롭, 500px WebP 번들 `approved_labels.json` 내보내기) 생성 → 웹앱 **설정 → `[승인된 라벨 일괄 적용]`** 으로 `drive.file` 권한 내 일괄 업로드 및 동일 와인 전체 빈티지 공통 연결.
 
 ---
 
@@ -245,6 +245,7 @@ wine-forest/
 │   └── favicon.svg                 # JH Wine Forest 심볼 (포레스트 + 와인글라스 미니멀 SVG)
 ├── scripts/
 │   ├── local_migration_script            # wine_list.xlsx -> wine_db.json + migration_review.md
+│   ├── label_review_tool.py        # Phase 2-3B 기존 와인 라벨 일괄 검색 · 사용자 컨펌 HTML 생성기
 │   └── requirements.txt            # openpyxl
 ├── src/
 │   ├── components/
@@ -367,7 +368,7 @@ Antigravity(Gemini Neon)는 아래 **6개 마일스톤**을 순서대로 완료�
 
 ## 10. 최종 완료 기준 (Definition of Done — 검증 완료)
 
-- [x] `npm run test` 모든 단위 테스트(스키마, 230218 통계·3단계 산지, 충돌 감지·주 1회 백업, 프라이버시 마스킹, 스토어 도메인 변이, Phase 2 음용 적기 자동 추천·별점/시음노트·이미지 리사이징·단일 사진 피커) 100% 통과 (6 suites / 27 tests)
+- [x] `npm run test` 모든 단위 테스트(스키마, 230218 통계·3단계 산지, 충돌 감지·주 1회 백업, 프라이버시 마스킹, 스토어 도메인 변이, Phase 2 음용 적기 자동 추천·별점/시음노트·이미지 리사이징·단일 사진 피커·라벨 일괄 적용) 100% 통과 (6 suites / 28 tests)
 - [x] `npm run build` TypeScript/Vite 에러 및 경고 없이 완료, PWA 서비스워커(`dist/sw.js`) 정상 생성
 - [x] 모바일(`390×844`)과 데스크톱(`1440×900`) 양쪽에서 라이트/다크 모드 모두 대비·가독성 결함 없음 (화이트 연노랑 `#F3EED4`/`#EFEAD0` 다크 텍스트 대비 포함)
 - [x] 프라이버시 토글(`👁️`) ON 시 앱 내 모든 페이지·모달·외화 메모(`<FxNoteText />`)·비고/메모 원문(`<MemoText />`)·차트(가격대 분포 오버레이 포함)에서 금액 정보 100% 마스킹 확인

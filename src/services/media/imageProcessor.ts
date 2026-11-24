@@ -143,3 +143,30 @@ export async function compressImageFile(
     bitmapToClose?.close();
   }
 }
+
+/**
+ * data:image/...;base64,... 문자열을 바이너리 Blob으로 안전 변환 (브라우저/테스트 공용)
+ */
+export function dataUrlToBlob(dataUrl: string): { blob: Blob; mimeType: string; extension: string } {
+  const match = dataUrl.match(/^data:(image\/[a-zA-Z0-9.+-]+);base64,(.+)$/);
+  if (!match) {
+    throw new Error('유효한 Base64 이미지 Data URL 형식이 아닙니다.');
+  }
+  const mimeType = match[1];
+  const base64 = match[2];
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i += 1) {
+    bytes[i] = binary.charCodeAt(i);
+  }
+  const extension = mimeType.includes('webp')
+    ? 'webp'
+    : mimeType.includes('png')
+      ? 'png'
+      : 'jpg';
+  return {
+    blob: new Blob([bytes], { type: mimeType }),
+    mimeType,
+    extension,
+  };
+}

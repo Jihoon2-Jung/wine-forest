@@ -8,7 +8,7 @@ import {
   getDrinkingWindowStatus,
 } from '@/services/domain/wineHelpers';
 import { estimateDrinkingWindow } from '@/services/domain/drinkingWindowEstimator';
-import { computeScaledDimensions } from '@/services/media/imageProcessor';
+import { computeScaledDimensions, dataUrlToBlob } from '@/services/media/imageProcessor';
 import { pickImageFile } from '@/services/media/photoPicker';
 import { createDemoDatabase } from '@/services/storage/defaultTemplates';
 
@@ -249,6 +249,82 @@ describe('Phase 2-3A — Image Scaling & Unified Photo Picker', () => {
       expect(picked).toBe(fakeFile);
     } finally {
       clickSpy.mockRestore();
+    }
+  });
+
+  it('converts base64 Data URLs to Blobs and applies approved_labels bundle in bulk', async () => {
+    const sampleDataUrl = 'data:image/webp;base64,UklGRh4AAABXRUJQVlA4TBEAAAAvAAAAAAfQ//73v/+BiOh/AAA=';
+    const { blob, extension } = dataUrlToBlob(sampleDataUrl);
+    expect(extension).toBe('webp');
+    expect(blob.type).toBe('image/webp');
+    expect(blob.size).toBeGreaterThan(0);
+
+    const origCreate = URL.createObjectURL;
+    const origRevoke = URL.revokeObjectURL;
+    URL.createObjectURL = vi.fn(() => 'blob:mock-label-1');
+    URL.revokeObjectURL = vi.fn();
+
+    try {
+      const demoDb = createDemoDatabase();
+      demoDb.metadata.lastBackupAt = new Date().toISOString();
+      // 동일 와인명·색상의 다른 빈티지 추가 (빈티지 무관 공통 라벨 적용 검증)
+      const baseWine = demoDb.wines[0];
+      const siblingWine: WineMaster = {
+        ...baseWine,
+        id: 'wine-sibling-vintage',
+        vintage: '2022',
+        labelImageFileId: null,
+      };
+      demoDb.wines.push(siblingWine);
+      useWineStore.setState({ db: demoDb, storageMode: 'local_test' });
+
+      const result = await useWineStore.getState().importApprovedLabelsBundle({
+        schemaVersion: 1,
+        generatedAt: '2026-11-24T00:00:00Z',
+        items: [
+          {
+            wineId: baseWine.id,
+            wineIds: [baseWine.id, siblingWine.id],
+            wineName: baseWine.name,
+            color: baseWine.color,
+            mimeType: 'image/webp',
+            dataUrl: sampleDataUrl,
+          },
+          {
+            wineId: 'non-existent-wine-id',
+            dataUrl: sampleDataUrl,
+          },
+        ],
+      });
+
+      expect(result).toEqual({ applied: 2, skipped: 1, failed: 0 });
+      const updatedBase = useWineStore.getState().db!.wines.find((w) => w.id === baseWine.id)!;
+      const updatedSibling = useWineStore.getState().db!.wines.find((w) => w.id === siblingWine.id)!;
+      expect(updatedBase.labelImageFileId).toBeTruthy();
+      expect(updatedBase.labelImageFileId).toBe(updatedSibling.labelImageFileId);
+
+      // 추후 새 빈티지 입고 시 기존 (와인명, 색상) 라벨 자동 상속 검증
+      await useWineStore.getState().addBottles({
+        name: baseWine.name,
+        country: baseWine.country,
+        region: baseWine.region,
+        subRegion: baseWine.subRegion,
+        color: baseWine.color,
+        vintage: '2024',
+        bottleSizeMl: 750,
+        quantity: 1,
+        purchasePrice: 90000,
+        locationId: demoDb.locations[0].id,
+        purchaseDate: '2026-11-24',
+        purchaseSource: '와인샵',
+      });
+      const newVintageWine = useWineStore
+        .getState()
+        .db!.wines.find((w) => w.name === baseWine.name && w.vintage === '2024')!;
+      expect(newVintageWine.labelImageFileId).toBe(updatedBase.labelImageFileId);
+    } finally {
+      URL.createObjectURL = origCreate;
+      URL.revokeObjectURL = origRevoke;
     }
   });
 });

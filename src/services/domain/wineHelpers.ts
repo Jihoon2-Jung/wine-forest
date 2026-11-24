@@ -29,6 +29,13 @@ export function buildWineMasterKey(params: {
   ].join('|');
 }
 
+/**
+ * 라벨 사진 공통 매칭 키: 빈티지·용량 구분 없이 (와인명, 색상) 단위로 라벨 공유
+ */
+export function buildWineLabelGroupKey(params: { name: string; color: WineColor }): string {
+  return `${params.name.trim().toLowerCase()}|${params.color}`;
+}
+
 export function findMatchingWineMaster(
   wines: WineMaster[],
   params: {

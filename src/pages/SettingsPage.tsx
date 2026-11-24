@@ -6,6 +6,7 @@ import {
   FlaskConical,
   HardDrive,
   History,
+  Images,
   KeyRound,
   RefreshCw,
   RotateCcw,
@@ -27,6 +28,7 @@ export function SettingsPage() {
   const hasUnsyncedChanges = useWineStore((s) => s.hasUnsyncedChanges);
   const backups = useWineStore((s) => s.backups);
   const isLoadingBackups = useWineStore((s) => s.isLoadingBackups);
+  const bulkLabelProgress = useWineStore((s) => s.bulkLabelProgress);
 
   const syncNow = useWineStore((s) => s.syncNow);
   const reauthenticateAndSync = useWineStore((s) => s.reauthenticateAndSync);
@@ -38,12 +40,14 @@ export function SettingsPage() {
   const restoreFromBackup = useWineStore((s) => s.restoreFromBackup);
   const exportLocalJson = useWineStore((s) => s.exportLocalJson);
   const importJsonDatabase = useWineStore((s) => s.importJsonDatabase);
+  const importApprovedLabelsBundle = useWineStore((s) => s.importApprovedLabelsBundle);
   const updateTrackingSinceDate = useWineStore((s) => s.updateTrackingSinceDate);
   const autoFillMissingDrinkingWindows = useWineStore((s) => s.autoFillMissingDrinkingWindows);
   const disconnectAndResetLocal = useWineStore((s) => s.disconnectAndResetLocal);
   const showToast = useWineStore((s) => s.showToast);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const labelsBundleInputRef = useRef<HTMLInputElement>(null);
   const [trackingDate, setTrackingDate] = useState(db?.metadata.trackingSinceDate ?? '2023-02-18');
   const [recalcAll, setRecalcAll] = useState(false);
 
@@ -77,6 +81,20 @@ export function SettingsPage() {
     } catch (err) {
       const msg = err instanceof Error ? err.message : '유효하지 않은 JSON 형식입니다.';
       showToast(`가져오기 실패: ${msg}`, 'error');
+    }
+  };
+
+  const handleImportLabelsBundle = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    try {
+      const text = await file.text();
+      const parsed = JSON.parse(text) as unknown;
+      await importApprovedLabelsBundle(parsed);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : '유효하지 않은 승인 라벨 번들 형식입니다.';
+      showToast(`라벨 일괄 적용 실패: ${msg}`, 'error');
     }
   };
 
@@ -299,13 +317,36 @@ export function SettingsPage() {
             <Upload className="h-3.5 w-3.5 text-burgundy" />
             <span>JSON 파일로 덮어쓰기 (Import)</span>
           </button>
+          <button
+            type="button"
+            disabled={Boolean(bulkLabelProgress)}
+            onClick={() => labelsBundleInputRef.current?.click()}
+            className="inline-flex items-center gap-1.5 rounded-xl border border-subtle bg-elevated px-3.5 py-2 text-xs font-bold text-primary hover:border-forest disabled:opacity-50"
+          >
+            <Images className="h-3.5 w-3.5 text-forest" />
+            <span>
+              {bulkLabelProgress
+                ? `라벨 업로드 중... (${bulkLabelProgress.current}/${bulkLabelProgress.total})`
+                : '승인된 라벨 일괄 적용 (approved_labels.json)'}
+            </span>
+          </button>
         </div>
+        <p className="text-[11px] text-secondary">
+          PC에서 <code>scripts/label_review_tool.py</code>로 검수·승인한 <code>approved_labels.json</code>을 올리면 Google Drive(<code>photos/</code>)에 일괄 업로드됩니다.
+        </p>
         <input
           ref={fileInputRef}
           type="file"
           accept="application/json,.json"
           className="hidden"
           onChange={(e) => void handleImportFile(e)}
+        />
+        <input
+          ref={labelsBundleInputRef}
+          type="file"
+          accept="application/json,.json"
+          className="hidden"
+          onChange={(e) => void handleImportLabelsBundle(e)}
         />
       </section>
 

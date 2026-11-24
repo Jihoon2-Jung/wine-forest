@@ -7,7 +7,7 @@ import type {
   WineDatabase,
   WineMaster,
 } from '@/types/schema';
-import { parseWineDatabase } from '@/types/validation';
+import { parseApprovedLabelsBundle, parseWineDatabase } from '@/types/validation';
 import {
   clearAccessToken,
   hasGoogleClientId,
@@ -15,6 +15,7 @@ import {
   requestAccessToken,
 } from '@/services/auth/googleAuth';
 import {
+  buildWineLabelGroupKey,
   findMatchingWineMaster,
   formatBackupDateTimeStamp,
   generateId,
@@ -27,7 +28,7 @@ import { GoogleDriveAdapter } from '@/services/storage/googleDriveAdapter';
 import { clearCachedState, loadCachedState, saveCachedState } from '@/services/storage/localCache';
 import { LocalOnlyAdapter } from '@/services/storage/localOnlyAdapter';
 import { syncEngine } from '@/services/storage/syncEngine';
-import { compressImageFile } from '@/services/media/imageProcessor';
+import { compressImageFile, dataUrlToBlob } from '@/services/media/imageProcessor';
 import { evictPhotoFromCache, registerUploadedPhotoBlob } from '@/services/media/photoLoader';
 import {
   AuthRequiredError,
@@ -223,6 +224,7 @@ interface WineStoreState {
   modeSwitchConflict: ModeSwitchConflictState | null;
   backups: BackupSnapshot[];
   isLoadingBackups: boolean;
+  bulkLabelProgress: { current: number; total: number } | null;
 
   // Global UI
   isPrivacyMode: boolean;
@@ -280,11 +282,14 @@ interface WineStoreState {
   updateTrackingSinceDate: (newDate: string, recalculateExisting: boolean) => Promise<void>;
   autoFillMissingDrinkingWindows: () => Promise<number>;
 
-  // Phase 2-3A: Media (Label & Tasting Photos) — Blob 기반으로 Web File 및 Capacitor Camera 모두 수용
+  // Phase 2-3A & 2-3B: Media (Label & Tasting Photos + Bulk Approved Label Bundle)
   uploadWineLabelPhoto: (wineId: string, file: Blob) => Promise<void>;
   removeWineLabelPhoto: (wineId: string) => Promise<void>;
   uploadTastingPhoto: (file: Blob) => Promise<string | null>;
   deleteTastingPhotoFile: (fileId: string) => Promise<void>;
+  importApprovedLabelsBundle: (
+    raw: unknown,
+  ) => Promise<{ applied: number; skipped: number; failed: number }>;
 
   // UI Actions
   togglePrivacyMode: () => void;
@@ -422,6 +427,7 @@ export const useWineStore = create<WineStoreState>((set, get) => {
     modeSwitchConflict: null,
     backups: [],
     isLoadingBackups: false,
+    bulkLabelProgress: null,
 
     isPrivacyMode: loadInitialPrivacy(),
     theme: loadInitialTheme(),
@@ -1028,6 +1034,12 @@ export const useWineStore = create<WineStoreState>((set, get) => {
         }
       } else {
         wineId = generateId();
+        // 빈티지 무관 라벨 공유: 같은 (와인명, 색상)의 기존 라벨이 있으면 새 빈티지에도 자동 상속
+        const labelGroupKey = buildWineLabelGroupKey({ name: trimmedName, color: input.color });
+        const inheritedLabelId =
+          db.wines.find(
+            (w) => w.labelImageFileId && buildWineLabelGroupKey(w) === labelGroupKey,
+          )?.labelImageFileId ?? null;
         const newMaster: WineMaster = {
           id: wineId,
           name: trimmedName,
@@ -1038,7 +1050,7 @@ export const useWineStore = create<WineStoreState>((set, get) => {
           color: input.color,
           vintage,
           bottleSizeMl: sizeMl,
-          labelImageFileId: null,
+          labelImageFileId: inheritedLabelId,
           drinkingWindowStart: input.drinkingWindowStart ?? null,
           drinkingWindowEnd: input.drinkingWindowEnd ?? null,
           createdAt: now,
@@ -1431,16 +1443,37 @@ export const useWineStore = create<WineStoreState>((set, get) => {
         const { fileId } = await adapter.uploadPhoto(processed.blob, fileName);
         await registerUploadedPhotoBlob(fileId, processed.blob);
 
-        const oldFileId = wine.labelImageFileId;
+        // 빈티지 구분 없이 동일 (와인명, 색상) 전체 빈티지에 라벨 1장을 공통 적용
+        const targetGroupKey = buildWineLabelGroupKey(wine);
+        const oldFileIds = new Set<string>();
+        let sharedCount = 0;
         const now = new Date().toISOString();
-        const nextWines = db.wines.map((w) =>
-          w.id === wineId ? { ...w, labelImageFileId: fileId, updatedAt: now } : w,
-        );
-        await commitMutation({ ...db, wines: nextWines }, '와인 라벨 사진을 등록했습니다.');
+        const nextWines = db.wines.map((w) => {
+          if (buildWineLabelGroupKey(w) === targetGroupKey) {
+            if (w.labelImageFileId && w.labelImageFileId !== fileId) {
+              oldFileIds.add(w.labelImageFileId);
+            }
+            sharedCount += 1;
+            return { ...w, labelImageFileId: fileId, updatedAt: now };
+          }
+          return w;
+        });
 
-        if (oldFileId && oldFileId !== fileId) {
-          void adapter.deletePhoto(oldFileId).catch(() => undefined);
-          void evictPhotoFromCache(oldFileId);
+        await commitMutation(
+          { ...db, wines: nextWines },
+          sharedCount > 1
+            ? `라벨 사진을 등록해 동일 와인 ${sharedCount}개 빈티지에 공통 적용했습니다.`
+            : '와인 라벨 사진을 등록했습니다.',
+        );
+
+        const stillReferenced = new Set(
+          nextWines.map((w) => w.labelImageFileId).filter((id): id is string => Boolean(id)),
+        );
+        for (const oldId of oldFileIds) {
+          if (!stillReferenced.has(oldId)) {
+            void adapter.deletePhoto(oldId).catch(() => undefined);
+            void evictPhotoFromCache(oldId);
+          }
         }
       } catch (err) {
         const msg = err instanceof Error ? err.message : '라벨 사진 업로드에 실패했습니다.';
@@ -1455,18 +1488,30 @@ export const useWineStore = create<WineStoreState>((set, get) => {
       const wine = db.wines.find((w) => w.id === wineId);
       if (!wine?.labelImageFileId) return;
 
-      const oldFileId = wine.labelImageFileId;
+      const targetGroupKey = buildWineLabelGroupKey(wine);
+      const removedFileIds = new Set<string>();
       const now = new Date().toISOString();
-      const nextWines = db.wines.map((w) =>
-        w.id === wineId ? { ...w, labelImageFileId: null, updatedAt: now } : w,
-      );
+      const nextWines = db.wines.map((w) => {
+        if (buildWineLabelGroupKey(w) === targetGroupKey && w.labelImageFileId) {
+          removedFileIds.add(w.labelImageFileId);
+          return { ...w, labelImageFileId: null, updatedAt: now };
+        }
+        return w;
+      });
       await commitMutation({ ...db, wines: nextWines }, '라벨 사진을 삭제했습니다.');
 
+      const stillReferenced = new Set(
+        nextWines.map((w) => w.labelImageFileId).filter((id): id is string => Boolean(id)),
+      );
       const adapter = getAdapter(state.storageMode);
-      if (state.storageMode === 'local_test' || isTokenValid()) {
-        void adapter.deletePhoto(oldFileId).catch(() => undefined);
+      for (const oldFileId of removedFileIds) {
+        if (!stillReferenced.has(oldFileId)) {
+          if (state.storageMode === 'local_test' || isTokenValid()) {
+            void adapter.deletePhoto(oldFileId).catch(() => undefined);
+          }
+          void evictPhotoFromCache(oldFileId);
+        }
       }
-      void evictPhotoFromCache(oldFileId);
     },
 
     uploadTastingPhoto: async (file) => {
@@ -1497,6 +1542,118 @@ export const useWineStore = create<WineStoreState>((set, get) => {
         void adapter.deletePhoto(fileId).catch(() => undefined);
       }
       void evictPhotoFromCache(fileId);
+    },
+
+    importApprovedLabelsBundle: async (raw) => {
+      const state = get();
+      const db = state.db;
+      if (!db) return { applied: 0, skipped: 0, failed: 0 };
+
+      const bundle = parseApprovedLabelsBundle(raw);
+      if (state.storageMode === 'google_drive' && !isTokenValid()) {
+        set({ syncStatus: 'auth_required' });
+        get().showToast(
+          '라벨을 Google Drive에 일괄 업로드하려면 먼저 상단 [구글 재인증]을 눌러 주세요.',
+          'warning',
+        );
+        return { applied: 0, skipped: 0, failed: bundle.items.length };
+      }
+
+      const wineMap = new Map(db.wines.map((w) => [w.id, w]));
+      const winesByLabelGroup = new Map<string, WineMaster[]>();
+      for (const w of db.wines) {
+        const gKey = buildWineLabelGroupKey(w);
+        const list = winesByLabelGroup.get(gKey) ?? [];
+        list.push(w);
+        winesByLabelGroup.set(gKey, list);
+      }
+
+      const adapter = getAdapter(state.storageMode);
+      const uploadedByWineId = new Map<string, string>();
+      const oldFileIdsToDelete = new Set<string>();
+      let skipped = 0;
+      let failed = 0;
+
+      set({ bulkLabelProgress: { current: 0, total: bundle.items.length } });
+      try {
+        for (let idx = 0; idx < bundle.items.length; idx += 1) {
+          const item = bundle.items[idx];
+          set({ bulkLabelProgress: { current: idx + 1, total: bundle.items.length } });
+
+          // 빈티지 구분 없이 매칭: wineIds / wineId + 동일 (와인명, 색상) 전체 빈티지에 1장 공통 적용
+          const candidateIds = item.wineIds && item.wineIds.length > 0 ? item.wineIds : [item.wineId];
+          const matchedWines = new Map<string, WineMaster>();
+          for (const cid of candidateIds) {
+            const found = wineMap.get(cid);
+            if (found) {
+              matchedWines.set(found.id, found);
+              for (const sibling of winesByLabelGroup.get(buildWineLabelGroupKey(found)) ?? []) {
+                matchedWines.set(sibling.id, sibling);
+              }
+            }
+          }
+          if (matchedWines.size === 0 && item.wineName && item.color) {
+            const gKey = buildWineLabelGroupKey({ name: item.wineName, color: item.color });
+            for (const sibling of winesByLabelGroup.get(gKey) ?? []) {
+              matchedWines.set(sibling.id, sibling);
+            }
+          }
+
+          if (matchedWines.size === 0) {
+            skipped += 1;
+            continue;
+          }
+
+          try {
+            const { blob, extension } = dataUrlToBlob(item.dataUrl);
+            const fileName = `label_${item.wineId.slice(0, 8)}_${Date.now()}_${idx}.${extension}`;
+            const { fileId } = await adapter.uploadPhoto(blob, fileName);
+            await registerUploadedPhotoBlob(fileId, blob);
+            for (const targetWine of matchedWines.values()) {
+              if (targetWine.labelImageFileId && targetWine.labelImageFileId !== fileId) {
+                oldFileIdsToDelete.add(targetWine.labelImageFileId);
+              }
+              uploadedByWineId.set(targetWine.id, fileId);
+            }
+          } catch {
+            failed += 1;
+          }
+        }
+
+        const applied = uploadedByWineId.size;
+        if (applied > 0) {
+          const now = new Date().toISOString();
+          const latestDb = get().db ?? db;
+          const nextWines = latestDb.wines.map((w) => {
+            const nextFileId = uploadedByWineId.get(w.id);
+            return nextFileId ? { ...w, labelImageFileId: nextFileId, updatedAt: now } : w;
+          });
+          const summaryMsg =
+            `승인된 라벨을 ${applied}개 와인(전체 빈티지 포함)에 일괄 적용했습니다.` +
+            (skipped > 0 ? ` (미일치 ${skipped}건 제외)` : '') +
+            (failed > 0 ? ` (실패 ${failed}건)` : '');
+          await commitMutation({ ...latestDb, wines: nextWines }, summaryMsg);
+
+          const stillReferenced = new Set(
+            nextWines.map((w) => w.labelImageFileId).filter((id): id is string => Boolean(id)),
+          );
+          for (const oldId of oldFileIdsToDelete) {
+            if (!stillReferenced.has(oldId)) {
+              void adapter.deletePhoto(oldId).catch(() => undefined);
+              void evictPhotoFromCache(oldId);
+            }
+          }
+        } else {
+          get().showToast(
+            `적용된 라벨이 없습니다. (미일치 ${skipped}건 · 실패 ${failed}건)`,
+            'warning',
+          );
+        }
+
+        return { applied, skipped, failed };
+      } finally {
+        set({ bulkLabelProgress: null });
+      }
     },
 
     // --- UI Actions ---

@@ -74,3 +74,26 @@ python3 local_migration_script \
 1. 생성된 `migration_review.md` 상단의 **[정합성 검증표]**(`R1` 보유 총 병수, `T1` 보유 총 금액, `V1` `23.02.18` 이후 전체 누적 지출액 — 보정 전 원본 0원 일치 및 개별 보정 내역)를 확인합니다.
 2. 웹앱을 열고 **Google 로그인 → `[📂 기존 wine_db.json 가져오기]`** (또는 설정 화면의 **JSON 파일로 덮어쓰기**)를 눌러 업로드합니다.
    - ⚠️ **주의:** 최소 권한(`drive.file`) 보안 정책상 Google Drive 웹에서 직접 `JH_Wine_Forest/wine_db.json`을 업로드하면 앱이 해당 파일을 인식할 수 없습니다. 반드시 **앱 내부 Import 버튼**을 사용해 주세요.
+
+---
+
+## 4. 기존 보유 와인 라벨 일괄 검색 · 컨펌 도구 (Phase 2-3B)
+
+PC에서 보유 와인 목록(`wine_db.json`)을 **빈티지 구분 없이 `(와인명, 색상)` 단위로 묶어** 라벨 검수용 HTML을 생성하고, 브라우저에서 컨펌한 라벨만 500px WebP 번들로 묶어 웹앱에 일괄 반영(동일 와인 전체 빈티지 공통 적용 + 추후 새 빈티지 자동 상속)할 수 있습니다.
+
+```bash
+# 기본 실행 (공개 API 후보 탐색 + 검수 HTML 생성; 별도 pip 패키지 불필요)
+python3 scripts/label_review_tool.py \
+  --input ~/Documents/wine-backup/wine_db.json \
+  --out-html ~/Documents/wine-backup/label_review.html
+
+# 원격 검색 생략하고 검수 HTML만 1초 만에 생성 (구글 이미지 복사 -> 카드 Cmd+V 초고속 검수용)
+python3 scripts/label_review_tool.py \
+  --input ~/Documents/wine-backup/wine_db.json \
+  --out-html ~/Documents/wine-backup/label_review.html \
+  --no-remote
+```
+
+1. 생성된 `label_review.html`을 브라우저로 열어 후보 클릭, 이미지 URL 입력, 또는 **`Cmd+V`(이미지 복사 후 붙여넣기)** / 드래그&드롭으로 라벨을 승인합니다.
+2. 우측 상단 **`[📦 승인 라벨 번들 내보내기]`** 를 눌러 `approved_labels_YYYYMMDD.json`을 다운로드합니다.
+3. 웹앱 **설정(⚙️) → `[승인된 라벨 일괄 적용 (approved_labels.json)]`** 에 업로드하면 `JH_Wine_Forest/photos/`에 자동 업로드 및 연결됩니다.
