@@ -177,7 +177,6 @@ function detectDeviceLabel(): string {
   if (Capacitor.isNativePlatform()) {
     const platform = Capacitor.getPlatform();
     if (platform === 'ios') return 'iOS App';
-    if (platform === 'android') return 'Android App';
     return 'Mobile App';
   }
   if (typeof navigator === 'undefined') return 'Web';

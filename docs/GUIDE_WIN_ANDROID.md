@@ -1,9 +1,9 @@
 # JH Wine Forest — Windows PC Android 빌드 · 서명 · 배포 실전 가이드 (`GUIDE_WIN_ANDROID.md`)
 
-> **문서 목적:** 본 가이드는 **단일 Git 저장소(`wine-forest`) + PC 이원화 빌드 전략(Mac = iOS / Windows = Android)**에 따라, **Windows PC에서 Android 앱을 빌드·서명·실기기 설치**하기 위한 단독 실행형 매뉴얼입니다.
-> - **상태:** **READY FOR WINDOWS ANDROID BUILD — Mac M1~M3 완료 및 `main` 브랜치 푸시 완료 (Windows에서 즉시 풀·빌드 가능)**
+> **문서 목적:** 본 가이드는 **단일 Git 저장소(`wine-forest`) + PC 이원화 빌드 전략(Mac = iOS / Windows = Android)**에 따라, **Windows PC에서 Android 앱을 구현·빌드·서명·실기기 설치**하기 위한 단독 실행형 매뉴얼입니다.
+> - **상태:** **WINDOWS STANDALONE — Mac에서는 공통 웹/앱 코드(`src/`)와 `ios/`만 선행 구현되며, `android/` 스캐폴딩(`@capacitor/android`, `@capacitor/app`, `GoogleDriveAuthPlugin.kt`, Android 뒤로가기 연동)은 저장소에 포함하지 않고 Windows PC에서 직접 생성·구현합니다.**
 >
-> **전제 조건:** Mac에서 이미 공통 웹/앱 코드(`src/`), Capacitor 설정(`capacitor.config.ts`), Android 프로젝트(`android/`) 및 `GoogleDriveAuthPlugin.kt` 작성이 완료되어 `main` 브랜치에 푸시된 상태에서 진행합니다. (전체 설계는 [MOBILE_IMPLEMENTATION_PLAN.md](./MOBILE_IMPLEMENTATION_PLAN.md) 참고)
+> **전제 조건:** Mac에서 공통 웹/앱 코드(`src/`), `AuthAdapter`, `capacitor.config.ts`가 `main` 브랜치에 푸시되어 있으나 **`android/` 디렉터리는 아직 생성되지 않은 상태**입니다. Windows에서 `git pull` 후 아래 안내에 따라 `@capacitor/android` 설치 및 Android 프로젝트를 생성해 진행합니다. (전체 설계는 [MOBILE_IMPLEMENTATION_PLAN.md](./MOBILE_IMPLEMENTATION_PLAN.md) 참고)
 
 ---
 
@@ -20,15 +20,20 @@ Windows에서 체크아웃 시 `android/gradlew` 쉘 스크립트의 줄바꿈(L
 git config --global core.autocrlf input
 ```
 
-### 1.3 최초 1회 클론 & 동기화 명령어 (PowerShell)
+### 1.3 최초 1회 클론 & Android 프로젝트 초기화 (PowerShell)
 ```powershell
-git clone https://github.com/<GitHub계정명>/wine-forest.git
+git clone https://github.com/Jihoon2-Jung/wine-forest.git
 cd wine-forest
 
 npm ci
+# 저장소에 android/ 및 @capacitor/android, @capacitor/app이 아직 없으므로 Windows에서 최초 1회 추가
+npm install -D @capacitor/android
+npm install @capacitor/app
 npm run build:mobile
+npx cap add android
 npx cap sync android
 ```
+* 이후 [SPEC_MOBILE_IOS.md §4.3 · §6](./SPEC_MOBILE_IOS.md)의 명세를 참고해 `android/app/build.gradle`(`play-services-auth:22.0.0`, 조건부 `keystore.properties` 서명), `GoogleDriveAuthPlugin.kt`, `MainActivity` 등록 및 필요 시 Android 뒤로가기/상태바 배경을 구성합니다.
 
 ### 1.4 일상 업데이트 루틴 (Mac 작업 후 Windows 동기화)
 새로운 변경사항을 반영할 때는 항상 아래 4줄만 순서대로 실행합니다.

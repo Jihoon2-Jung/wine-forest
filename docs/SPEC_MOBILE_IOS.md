@@ -1,7 +1,7 @@
 # JH Wine Forest — 모바일(iOS 중심 + 공통/Android 선행) 개발 작업지시서 (`SPEC_MOBILE_IOS.md`)
 
 > **문서 안내:** 본 문서는 [MOBILE_IMPLEMENTATION_PLAN.md](./MOBILE_IMPLEMENTATION_PLAN.md)의 세부 실행 명세서입니다.
-> - **상태:** **M1~M3 COMPLETED — 공통 코드 · iOS/Android 스캐폴딩 · `GoogleDriveAuth` 플러그인 작성 완료 (Xcode 설치 후 M4~M5 진행)**
+> - **상태:** **M1~M3 (Mac·iOS 범위) COMPLETED — 공통 코드 · `ios/` 스캐폴딩 · `GoogleDriveAuth` Swift 플러그인 작성 완료 (Android 코드는 미구현 · Windows PC 별도 진행, Mac은 Xcode 설치 후 M4~M5 진행)**
 > Mac 환경에서 **공통 코드(`src/`) 리팩토링, iOS 네이티브(`ios/`) 구현, Android 선행 스캐폴딩(`android/`) 작성**까지 누락 없이 구현·검증할 수 있도록 상세 지침을 제공합니다.
 > Windows PC에서의 Android Keystore 생성 및 빌드는 [GUIDE_WIN_ANDROID.md](./GUIDE_WIN_ANDROID.md)로 이어집니다.
 

@@ -1,7 +1,7 @@
 # JH Wine Forest — 모바일 앱(iOS / Android) 전환 마스터 구현 계획 (Mobile v1.0)
 
 > **연관 문서 (모바일 시리즈):**
-> - **상태:** **M1~M3 COMPLETED — 공통 코드(`src/`) · iOS/Android 스캐폴딩 · `GoogleDriveAuth` 네이티브 플러그인 구현 및 푸시 완료 (Windows M6 즉시 착수 가능 / Mac은 Xcode 설치 후 M4~M5 진행)**
+> - **상태:** **M1~M3 (Mac·iOS 범위) COMPLETED — 공통 코드(`src/`) · `ios/` 스캐폴딩 · `GoogleDriveAuth` Swift 플러그인 작성 완료 (Android 코드 미구현 · Windows PC 별도 진행, Mac은 Xcode 설치 후 M4~M5 진행)**
 > - **마스터 구현 계획:** `MOBILE_IMPLEMENTATION_PLAN.md` (본 문서)
 > - **Mac · iOS(+공통 코드 & Android 선행) 개발 작업지시서:** [SPEC_MOBILE_IOS.md](./SPEC_MOBILE_IOS.md)
 > - **Windows · Android 빌드/배포 실전 가이드:** [GUIDE_WIN_ANDROID.md](./GUIDE_WIN_ANDROID.md)
@@ -25,7 +25,7 @@
 | **OAuth 동의 화면 상태** | **프로덕션(Production) 게시 전환** | Refresh Token 7일 만료 제한 해제 → **사실상 영구 자동 로그인** (`drive.file`은 비민감 스코프) |
 | **iOS 의존성 및 서명** | **SPM (`CapApp-SPM`) + 무료 Personal Team USB 설치** | CocoaPods 미설치로 Mac 디스크 절약 (추후 연 \$99 TestFlight 업그레이드 가능) |
 | **1차 포함 모바일 UX** | ① JSON 내보내기 네이티브 공유 시트<br>② OS 상태바 라이트/다크 자동 연동<br>③ Android 뒤로가기(모달/라우트) 처리 | 햅틱 진동(`@capacitor/haptics`)·CI Android APK 자동 빌드는 1차 범위 제외 |
-| **현재 작업 순서** | **M1~M3 구현 완료 (웹 Phase 2 선반영 + 공통 코드 + `ios/`·`android/` 선행 푸시 완료)** | 다음 단계: Windows Android 빌드(M6) 및 Mac Xcode M4~M5 |
+| **현재 작업 순서** | **M1~M3 Mac·iOS 범위 구현 완료 (공통 `src/` + `ios/` 푸시 완료, `android/` 미구현)** | Android(`@capacitor/android`·`GoogleDriveAuthPlugin.kt`)는 Windows PC에서 별도 진행, Mac은 Xcode 설치 후 M4~M5 |
 
 ---
 
@@ -116,11 +116,10 @@ flowchart TD
 * **Phase M2 — `AuthAdapter` 추상화 · 네이티브 UX 브릿지 · 스토어 연동:**
   * `src/plugins/googleDriveAuth.ts`, `src/services/auth/*`, `src/services/native/nativeBridge.ts`, `googleDriveAdapter.ts`, `useWineStore.ts`(`detectDeviceLabel()` 네이티브 `iOS App`/`Android App` 분기 포함), UI(모달 뒤로가기 스택·온보딩·설정) 구현.
   * **검증:** `npm run typecheck`, `npm run test` (기존 스위트 + 신규 `tests/authAdapter.test.ts` 전체 통과).
-* **Phase M3 — iOS/Android 스캐폴딩 & 네이티브 플러그인 코드 작성:**
-  * `npx cap add ios --packagemanager SPM` & `npx cap add android` 생성.
-  * iOS: `GoogleDriveAuthPlugin.swift`, `WineForestViewController.swift`, `AppDelegate.swift`(및 `SceneDelegate.swift`), `Local.xcconfig.example`, `Info.plist` 구성 (Phase 2 카메라/사진 권한 `NSCameraUsageDescription`, `NSPhotoLibraryUsageDescription` 포함).
-  * Android: `GoogleDriveAuthPlugin.kt`, `MainActivity` 등록, `android/app/build.gradle` 의존성·조건부 릴리스 서명 블록, `AndroidManifest.xml` 권한(카메라·선택적 알림) 구성 후 Git 커밋·푸시.
-  * **검증:** Git 커밋 및 `origin/main` 푸시 (Windows에서 바로 pull 가능 상태 확보).
+* **Phase M3 — iOS 스캐폴딩 & 네이티브 플러그인 코드 작성 (Mac 범위):**
+  * `npx cap add ios --packagemanager SPM` 생성 (`android/` 스캐폴딩·Kotlin 플러그인은 Mac에서 구현하지 않고 Windows PC로 이관).
+  * iOS: `GoogleDriveAuthPlugin.swift`, `WineForestViewController.swift`, `AppDelegate.swift`, `SceneDelegate.swift`, `Local.xcconfig.example`, `App.xcconfig`, `AppDebug.xcconfig`, `Info.plist` 구성 (Phase 2 카메라/사진 권한 `NSCameraUsageDescription`, `NSPhotoLibraryUsageDescription` 포함).
+  * **검증:** Git 커밋 및 `origin/main` 푸시 (Windows에서 공통 `src/` pull 후 Android 별도 구성 가능 상태 확보).
 
 ### [IDE 설치 후 진행] 플랫폼별 빌드 · OAuth 연동 · 실기기 검증
 * **Phase M4 — Mac Xcode 환경 구축 & Google Cloud 프로덕션 전환:**

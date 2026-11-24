@@ -1,8 +1,6 @@
-import { useEffect, useRef, type ReactNode } from 'react';
+import type { ReactNode } from 'react';
 import { KeyRound } from 'lucide-react';
-import { useLocation, useNavigate } from 'react-router-dom';
 import { isNativeAuth } from '@/services/auth/googleAuth';
-import { initAndroidBackButton } from '@/services/native/nativeBridge';
 import { useWineStore } from '@/store/useWineStore';
 import { ConflictModal } from '@/components/common/ConflictModal';
 import { ToastBar } from '@/components/common/ToastBar';
@@ -17,33 +15,6 @@ export function AppShell({ children }: { children: ReactNode }) {
   const hasUnsyncedChanges = useWineStore((s) => s.hasUnsyncedChanges);
   const storageMode = useWineStore((s) => s.storageMode);
   const reauthenticateAndSync = useWineStore((s) => s.reauthenticateAndSync);
-  const showToast = useWineStore((s) => s.showToast);
-
-  const location = useLocation();
-  const navigate = useNavigate();
-  const pathnameRef = useRef(location.pathname);
-  pathnameRef.current = location.pathname;
-
-  useEffect(() => {
-    let active = true;
-    let cleanup: (() => void) | undefined;
-    void initAndroidBackButton({
-      getPathname: () => pathnameRef.current,
-      navigateBack: () => navigate(-1),
-      navigateHome: () => navigate('/', { replace: true }),
-      showExitHint: () => showToast('한 번 더 누르면 앱이 종료됩니다.', 'info'),
-    }).then((fn) => {
-      if (active) {
-        cleanup = fn;
-      } else {
-        fn();
-      }
-    });
-    return () => {
-      active = false;
-      cleanup?.();
-    };
-  }, [navigate, showToast]);
 
   const showReauthBanner =
     storageMode === 'google_drive' && (syncStatus === 'auth_required' || hasUnsyncedChanges);

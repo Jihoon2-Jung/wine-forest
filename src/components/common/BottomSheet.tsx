@@ -1,6 +1,5 @@
-import { useEffect, useId, useRef, type ReactNode } from 'react';
+import { useEffect, useRef, type ReactNode } from 'react';
 import { X } from 'lucide-react';
-import { registerModalCloser } from '@/services/native/nativeBridge';
 
 interface BottomSheetProps {
   open: boolean;
@@ -23,14 +22,8 @@ export function BottomSheet({
   children,
   footer,
 }: BottomSheetProps) {
-  const sheetId = useId();
   const latestOnCloseRef = useRef(onClose);
   latestOnCloseRef.current = onClose;
-
-  useEffect(() => {
-    if (!open || !dismissible) return;
-    return registerModalCloser(`sheet-${sheetId}`, () => latestOnCloseRef.current());
-  }, [open, dismissible, sheetId]);
 
   useEffect(() => {
     if (!open) return;
