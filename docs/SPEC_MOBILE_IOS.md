@@ -1,7 +1,7 @@
 # JH Wine Forest — 모바일(iOS 중심 + 공통/Android 선행) 개발 작업지시서 (`SPEC_MOBILE_IOS.md`)
 
 > **문서 안내:** 본 문서는 [MOBILE_IMPLEMENTATION_PLAN.md](./MOBILE_IMPLEMENTATION_PLAN.md)의 세부 실행 명세서입니다.
-> - **상태:** **M1~M3 (Mac·iOS 범위) COMPLETED — 공통 코드 · `ios/` 스캐폴딩 · `GoogleDriveAuth` Swift 플러그인 작성 완료 (Android 코드는 미구현 · Windows PC 별도 진행, Mac은 Xcode 설치 후 M4~M5 진행)**
+> - **상태:** **M1~M4 코드/CI 준비 완료 (Mac·iOS 범위) — `GoogleSignIn-iOS` SPM 연결 · `App.xcscheme` · GitHub Actions(`xcode-27`) `.ipa` 빌드 워크플로 구성 완료 (Android 코드 미구현 · Windows PC 별도 진행)**
 > Mac 환경에서 **공통 코드(`src/`) 리팩토링, iOS 네이티브(`ios/`) 구현, Android 선행 스캐폴딩(`android/`) 작성**까지 누락 없이 구현·검증할 수 있도록 상세 지침을 제공합니다.
 > Windows PC에서의 Android Keystore 생성 및 빌드는 [GUIDE_WIN_ANDROID.md](./GUIDE_WIN_ANDROID.md)로 이어집니다.
 
@@ -443,9 +443,24 @@ class MainActivity : BridgeActivity() {
 
 ---
 
-## 7. Mac Xcode 환경 준비 · Google Cloud 설정 · 무료 실기기 설치 가이드
+## 7. iOS 빌드 환경 준비 · Google Cloud 설정 · 무료 실기기 설치 가이드
 
-### 7.1 Mac Xcode 설치 및 디스크 절약 세팅
+### 7.0 채택 경로 (Intel Mac + iOS 27): GitHub Actions (`xcode-27`) + Sideloadly/SideStore
+Intel Mac에서는 Xcode 27(Apple Silicon 전용) 설치가 불가능하므로, Mac에 Xcode를 설치하지 않고 Public 저장소 무료 GitHub Actions 러너(`xcode-27`)로 미서명 `.ipa`를 빌드한 뒤 Sideloadly(권장) 또는 SideStore로 iOS 27 iPhone에 설치합니다.
+
+1. **Google Cloud Console 설정 (아래 7.2 절차 수행):**
+   * 기존 웹앱과 동일한 프로젝트에 iOS OAuth 클라이언트(`com.jihoon.wineforest`) 생성 + OAuth 동의 화면 `프로덕션(Production)` 게시.
+2. **GitHub Repository Secret 등록:**
+   * 저장소 **Settings → Secrets and variables → Actions → New repository secret**
+   * `GOOGLE_IOS_CLIENT_ID`: 발급받은 `xxxx.apps.googleusercontent.com` 값 등록 (`GOOGLE_IOS_REVERSED_CLIENT_ID`는 워크플로가 자동 역순 변환하므로 생략 가능).
+3. **`.ipa` 빌드 실행:**
+   * GitHub **Actions → `Build iOS Unsigned IPA (Xcode 27)` → `Run workflow`** 클릭 → 완료 후 아티팩트 `JH-Wine-Forest-iOS-unsigned-ipa` (1일 보관) 다운로드 및 압축 해제.
+4. **Sideloadly로 iPhone 설치 (무료 Apple ID):**
+   * Mac 또는 Windows PC에 [Sideloadly](https://sideloadly.io/) 설치 → iPhone USB 연결 → `.ipa` 드래그 → Apple ID 입력 → **Advanced Options**에서 `Use automatic bundle ID`가 꺼져 있는지(원래 `com.jihoon.wineforest` 유지) 확인 후 `Start`.
+   * *(만약 무료 Apple ID에서 Bundle ID가 충돌하거나 SideStore로 인해 `com.jihoon.wineforest.<TEAM_ID>`로 바뀐 경우, Google Cloud iOS OAuth 클라이언트의 번들 ID를 실제 설치된 Bundle ID와 동일하게 맞춰 주어야 Google 로그인이 동작합니다.)*
+   * iPhone **설정 → 일반 → VPN 및 기기 관리 → 개발자 앱 신뢰** 승인 및 **설정 → 개인정보 보호 및 보안 → 개발자 모드** 켜기.
+
+### 7.1 (대안) 로컬 Apple Silicon Mac Xcode 설치 및 디스크 절약 세팅
 1. **Xcode 설치:** Mac App Store에서 최신 **Xcode** 설치.
 2. **최초 실행 설정:**
    * Xcode 실행 시 추가 컴포넌트 선택 창에서 **iOS**만 체크 (watchOS/tvOS/visionOS는 체크 해제해 15GB+ 절약).

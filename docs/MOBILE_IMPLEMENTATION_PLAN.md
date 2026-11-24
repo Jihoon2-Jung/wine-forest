@@ -1,7 +1,7 @@
 # JH Wine Forest — 모바일 앱(iOS / Android) 전환 마스터 구현 계획 (Mobile v1.0)
 
 > **연관 문서 (모바일 시리즈):**
-> - **상태:** **M1~M3 (Mac·iOS 범위) COMPLETED — 공통 코드(`src/`) · `ios/` 스캐폴딩 · `GoogleDriveAuth` Swift 플러그인 작성 완료 (Android 코드 미구현 · Windows PC 별도 진행, Mac은 Xcode 설치 후 M4~M5 진행)**
+> - **상태:** **M1~M4 코드/CI 준비 완료 (Mac·iOS 범위) — `GoogleSignIn-iOS` SPM 연결 · 공용 `App.xcscheme` · GitHub Actions(`xcode-27`) `.ipa` 빌드 워크플로 구성 완료 (Android 코드 미구현 · Windows PC 별도 진행, Google Cloud/Secrets 등록 후 M5 실기기 설치 진행)**
 > - **마스터 구현 계획:** `MOBILE_IMPLEMENTATION_PLAN.md` (본 문서)
 > - **Mac · iOS(+공통 코드 & Android 선행) 개발 작업지시서:** [SPEC_MOBILE_IOS.md](./SPEC_MOBILE_IOS.md)
 > - **Windows · Android 빌드/배포 실전 가이드:** [GUIDE_WIN_ANDROID.md](./GUIDE_WIN_ANDROID.md)
@@ -23,9 +23,9 @@
 | **네이티브 Google 인증** | **방식 A: 공식 SDK 경량 커스텀 로컬 플러그인** (`GoogleDriveAuth`) | iOS `GoogleSignIn-iOS` (SPM) + Android `AuthorizationClient` (`play-services-auth`) |
 | **OAuth 스코프 및 프로젝트** | `https://www.googleapis.com/auth/drive.file` (**기존 웹과 동일 Google Cloud 프로젝트**) | 3기기(PC 웹·iOS·Android)가 동일한 `JH_Wine_Forest/wine_db.json` 공유 |
 | **OAuth 동의 화면 상태** | **프로덕션(Production) 게시 전환** | Refresh Token 7일 만료 제한 해제 → **사실상 영구 자동 로그인** (`drive.file`은 비민감 스코프) |
-| **iOS 의존성 및 서명** | **SPM (`CapApp-SPM`) + 무료 Personal Team USB 설치** | CocoaPods 미설치로 Mac 디스크 절약 (추후 연 \$99 TestFlight 업그레이드 가능) |
+| **iOS 의존성 및 서명** | **SPM (`CapApp-SPM` + `GoogleSignIn-iOS`) + GitHub Actions(`xcode-27`) 미서명 `.ipa` → Sideloadly/SideStore 무료 서명** | Intel Mac(Xcode 27 미지원) + iOS 27 조합 대응, Mac 디스크 0GB 사용 (추후 연 \$99 TestFlight 전환 가능) |
 | **1차 포함 모바일 UX** | ① JSON 내보내기 네이티브 공유 시트<br>② OS 상태바 라이트/다크 자동 연동<br>③ Android 뒤로가기(모달/라우트) 처리 | 햅틱 진동(`@capacitor/haptics`)·CI Android APK 자동 빌드는 1차 범위 제외 |
-| **현재 작업 순서** | **M1~M3 Mac·iOS 범위 구현 완료 (공통 `src/` + `ios/` 푸시 완료, `android/` 미구현)** | Android(`@capacitor/android`·`GoogleDriveAuthPlugin.kt`)는 Windows PC에서 별도 진행, Mac은 Xcode 설치 후 M4~M5 |
+| **현재 작업 순서** | **M1~M4 Mac·iOS 코드 & CI 워크플로 준비 완료 (`android/` 미구현)** | Google Cloud iOS OAuth + GitHub Secret(`GOOGLE_IOS_CLIENT_ID`) 등록 → Actions `.ipa` 빌드 → Sideloadly/SideStore로 iOS 27 실기기 검증(M5) |
 
 ---
 

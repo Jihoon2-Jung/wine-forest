@@ -1,0 +1,195 @@
+name: Build iOS Unsigned IPA (Xcode 27)
+
+on:
+  workflow_dispatch:
+    inputs:
+      bundle_id:
+        description: 'iOS Bundle ID (기본값: com.jihoon.wineforest — Google Cloud iOS OAuth 번들 ID와 일치해야 함)'
+        required: false
+        default: 'com.jihoon.wineforest'
+        type: string
+      allow_missing_oauth:
+        description: 'GOOGLE_IOS_CLIENT_ID 시크릿 없이 컴파일 테스트용 IPA 빌드 허용 (Google 로그인 비활성)'
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ios-ipa-build
+  cancel-in-progress: true
+
+jobs:
+  build-ios-ipa:
+    name: Build Unsigned iOS IPA (xcode-27)
+    runs-on: xcode-27
+    timeout-minutes: 30
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Print runner & Xcode environment
+        run: |
+          sw_vers
+          uname -m
+          xcodebuild -version
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install npm dependencies
+        run: npm ci
+
+      - name: Run typecheck & unit tests
+        run: |
+          npm run typecheck
+          npm run test
+
+      - name: Build Capacitor web bundle & sync iOS
+        run: |
+          npm run build:mobile
+          npx cap sync ios
+
+      - name: Configure iOS OAuth Local.xcconfig & Bundle ID
+        env:
+          RAW_CLIENT_ID: ${{ secrets.GOOGLE_IOS_CLIENT_ID }}
+          RAW_REVERSED_ID: ${{ secrets.GOOGLE_IOS_REVERSED_CLIENT_ID }}
+          INPUT_BUNDLE_ID: ${{ inputs.bundle_id }}
+          ALLOW_MISSING_OAUTH: ${{ inputs.allow_missing_oauth }}
+        run: |
+          set -euo pipefail
+
+          CLIENT_ID="$(printf '%s' "${RAW_CLIENT_ID:-}" | tr -d '[:space:]')"
+          REVERSED_ID="$(printf '%s' "${RAW_REVERSED_ID:-}" | tr -d '[:space:]')"
+          BUNDLE_ID="$(printf '%s' "${INPUT_BUNDLE_ID:-com.jihoon.wineforest}" | tr -d '[:space:]')"
+          if [ -z "$BUNDLE_ID" ]; then
+            BUNDLE_ID="com.jihoon.wineforest"
+          fi
+
+          if [ -z "$CLIENT_ID" ]; then
+            if [ "$ALLOW_MISSING_OAUTH" = "true" ]; then
+              echo "::warning::GOOGLE_IOS_CLIENT_ID 시크릿이 비어 있습니다. allow_missing_oauth=true 이므로 컴파일 테스트용 IPA를 생성합니다 (앱 내 Google 로그인 불가)."
+              cat > ios/App/Config/Local.xcconfig << 'EOF'
+          GOOGLE_IOS_CLIENT_ID =
+          GOOGLE_IOS_REVERSED_CLIENT_ID =
+          EOF
+            else
+              echo "::error::GitHub Secret 'GOOGLE_IOS_CLIENT_ID'가 설정되지 않았습니다. Settings > Secrets and variables > Actions 에서 GOOGLE_IOS_CLIENT_ID (예: 12345-xxxx.apps.googleusercontent.com)를 먼저 등록해 주세요."
+              exit 1
+            fi
+          else
+            if [[ "$CLIENT_ID" != *.apps.googleusercontent.com ]]; then
+              echo "::error::GOOGLE_IOS_CLIENT_ID 형식이 올바르지 않습니다. '.apps.googleusercontent.com'으로 끝나는 Google Cloud iOS OAuth 클라이언트 ID를 입력해 주세요."
+              exit 1
+            fi
+
+            if [ -z "$REVERSED_ID" ]; then
+              PREFIX="${CLIENT_ID%.apps.googleusercontent.com}"
+              REVERSED_ID="com.googleusercontent.apps.${PREFIX}"
+              echo "Derived GOOGLE_IOS_REVERSED_CLIENT_ID automatically from GOOGLE_IOS_CLIENT_ID."
+            fi
+
+            if [[ "$REVERSED_ID" != com.googleusercontent.apps.* ]]; then
+              echo "::error::GOOGLE_IOS_REVERSED_CLIENT_ID 형식이 올바르지 않습니다. 'com.googleusercontent.apps.'로 시작해야 합니다."
+              exit 1
+            fi
+
+            echo "::add-mask::${CLIENT_ID}"
+            echo "::add-mask::${REVERSED_ID}"
+
+            cat > ios/App/Config/Local.xcconfig << EOF
+          GOOGLE_IOS_CLIENT_ID = ${CLIENT_ID}
+          GOOGLE_IOS_REVERSED_CLIENT_ID = ${REVERSED_ID}
+          EOF
+            echo "Wrote ios/App/Config/Local.xcconfig (OAuth values masked)."
+          fi
+
+          if [ "$BUNDLE_ID" != "com.jihoon.wineforest" ]; then
+            echo "Applying custom iOS Bundle ID to App target: ${BUNDLE_ID}"
+            python3 - "$BUNDLE_ID" << 'PY'
+          import pathlib, sys
+          bundle_id = sys.argv[1]
+          pbx = pathlib.Path("ios/App/App.xcodeproj/project.pbxproj")
+          content = pbx.read_text(encoding="utf-8")
+          target = "PRODUCT_BUNDLE_IDENTIFIER = com.jihoon.wineforest;"
+          if target not in content:
+              raise SystemExit("Expected default PRODUCT_BUNDLE_IDENTIFIER not found in project.pbxproj")
+          pbx.write_text(content.replace(target, f"PRODUCT_BUNDLE_IDENTIFIER = {bundle_id};"), encoding="utf-8")
+          PY
+            plutil -lint ios/App/App.xcodeproj/project.pbxproj
+          fi
+
+      - name: Resolve Swift Package dependencies
+        run: |
+          xcodebuild \
+            -resolvePackageDependencies \
+            -project ios/App/App.xcodeproj \
+            -scheme App \
+            -clonedSourcePackagesDirPath ios/SourcePackages
+
+      - name: Build unsigned iOS Release app
+        run: |
+          xcodebuild \
+            -project ios/App/App.xcodeproj \
+            -scheme App \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath ios/DerivedData \
+            -clonedSourcePackagesDirPath ios/SourcePackages \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO \
+            DEVELOPMENT_TEAM="" \
+            PROVISIONING_PROFILE_SPECIFIER="" \
+            build
+
+      - name: Verify built App.app & Info.plist
+        env:
+          ALLOW_MISSING_OAUTH: ${{ inputs.allow_missing_oauth }}
+        run: |
+          set -euo pipefail
+          APP_PATH="ios/DerivedData/Build/Products/Release-iphoneos/App.app"
+          PLIST="${APP_PATH}/Info.plist"
+          test -d "$APP_PATH"
+          test -f "$PLIST"
+
+          echo "CFBundleDisplayName: $(/usr/libexec/PlistBuddy -c 'Print :CFBundleDisplayName' "$PLIST")"
+          echo "CFBundleIdentifier:  $(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$PLIST")"
+          echo "CFBundleShortVersionString: $(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$PLIST")"
+
+          if [ "$ALLOW_MISSING_OAUTH" != "true" ]; then
+            GID_VAL="$(/usr/libexec/PlistBuddy -c 'Print :GIDClientID' "$PLIST" || true)"
+            SCHEME_VAL="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleURLTypes:0:CFBundleURLSchemes:0' "$PLIST" || true)"
+            if [ -z "$GID_VAL" ] || [[ "$GID_VAL" == '$('* ]]; then
+              echo "::error::Built Info.plist GIDClientID was not substituted."
+              exit 1
+            fi
+            if [ -z "$SCHEME_VAL" ] || [[ "$SCHEME_VAL" == '$('* ]]; then
+              echo "::error::Built Info.plist URL Scheme was not substituted."
+              exit 1
+            fi
+            echo "Verified GIDClientID and CFBundleURLSchemes are populated in built Info.plist."
+          fi
+
+      - name: Package unsigned IPA
+        run: |
+          set -euo pipefail
+          rm -rf ios/ipa_staging ios/JH-Wine-Forest-unsigned.ipa
+          mkdir -p ios/ipa_staging/Payload
+          cp -R ios/DerivedData/Build/Products/Release-iphoneos/App.app ios/ipa_staging/Payload/App.app
+          (cd ios/ipa_staging && zip -qry ../JH-Wine-Forest-unsigned.ipa Payload)
+          ls -lh ios/JH-Wine-Forest-unsigned.ipa
+
+      - name: Upload unsigned IPA artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: JH-Wine-Forest-iOS-unsigned-ipa
+          path: ios/JH-Wine-Forest-unsigned.ipa
+          retention-days: 1
+          if-no-files-found: error

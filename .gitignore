@@ -45,6 +45,10 @@ label_review*/
 
 # Mobile Native Secrets & Signing Artifacts (Public Repo Guardrail)
 ios/App/Config/Local.xcconfig
+ios/DerivedData/
+ios/SourcePackages/
+ios/ipa_staging/
+*.ipa
 *.keystore
 *.jks
 keystore.properties

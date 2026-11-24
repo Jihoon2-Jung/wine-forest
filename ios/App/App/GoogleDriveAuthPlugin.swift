@@ -43,7 +43,7 @@ public class GoogleDriveAuthPlugin: CAPPlugin, CAPBridgedPlugin {
     @objc func signIn(_ call: CAPPluginCall) {
         guard isClientIdConfigured() else {
             call.reject(
-                "iOS Google Client ID(GIDClientID)가 설정되지 않았습니다. ios/App/Config/Local.xcconfig를 확인해 주세요.",
+                "iOS Google Client ID(GIDClientID)가 설정되지 않았습니다. GitHub Secrets(GOOGLE_IOS_CLIENT_ID) 또는 Local.xcconfig 설정을 확인해 주세요.",
                 "CONFIG_MISSING"
             )
             return
@@ -66,7 +66,7 @@ public class GoogleDriveAuthPlugin: CAPPlugin, CAPBridgedPlugin {
                         return
                     }
                     let nsError = error as NSError
-                    if nsError.code == GIDSignInError.canceled.rawValue {
+                    if nsError.domain == GIDSignInError.errorDomain && nsError.code == GIDSignInError.canceled.rawValue {
                         call.reject("USER_CANCELLED: 사용자가 로그인을 취소했습니다.", "USER_CANCELLED")
                         return
                     }
