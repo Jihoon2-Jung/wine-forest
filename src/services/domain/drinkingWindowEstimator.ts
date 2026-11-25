@@ -25,8 +25,10 @@ export interface DrinkingWindowEstimate {
 const VILLAGE_HYPHEN_STRIP_RE =
   /gevrey[\s-]*chambertin|쥬브레[\s-]*샹베르탱|vosne[\s-]*roman[eé]e|본[\s-]*로마네|chambolle[\s-]*musigny|샹볼[\s-]*뮈지니|chassagne[\s-]*montrachet|샤샤뉴[\s-]*몽라쉐|puligny[\s-]*montrachet|퓔리니[\s-]*몽라쉐|aloxe[\s-]*corton|알록스[\s-]*꼬르[통똥]/gi;
 
+const ALOXE_CORTON_RE = /aloxe[\s-]*corton|알록스[\s-]*꼬르[통똥]/i;
+
 const EXPLICIT_GRAND_CRU_RE =
-  /grand\s*cru|그랑\s*크뤼|에세죠|echezeaux|클로\s*드\s*부조|clos\s*de\s*vougeot|라\s*타슈|la\s*t[aâ]che|리쉬부르|richebourg|로마네[\s-]*(콩티|생[\s-]*비방)|roman[eé]e[\s-]*(conti|saint[\s-]*vivant|st[\s-]*vivant)|바타르[\s-]*몽라쉐|b[aâ]tard[\s-]*montrachet|슈발리에[\s-]*몽라쉐|chevalier[\s-]*montrachet|꼬르[통똥][\s-]*샤를마뉴|corton[\s-]*charlemagne|클로\s*드\s*베즈|clos\s*de\s*b[eè]ze|(mazis|charmes|griotte|latrici[eè]res|ruchottes|chapelle|mazoy[eè]res)[\s-]*chambertin|본[\s-]*마르|bonnes[\s-]*mares|클로\s*(생[\s-]*드니|드\s*라\s*로쉬|드\s*타르|데\s*랑브레)|clos\s*(saint[\s-]*denis|de\s*la\s*roche|de\s*tart|des\s*lambrays)/i;
+  /grand\s*cru|그랑\s*크뤼|에세죠|[eé]ch[eé]zeaux|클로\s*드\s*부조|clos\s*(?:de\s*)?vougeot|라\s*타슈|la\s*t[aâ]che|리쉬부르|richebourg|로마네[\s-]*(콩티|생[\s-]*비방)|roman[eé]e[\s-]*(conti|saint[\s-]*vivant|st\.?[\s-]*vivant)|바타르[\s-]*몽라쉐|b[aâ]tard[\s-]*montrachet|슈발리에[\s-]*몽라쉐|chevalier[\s-]*montrachet|꼬르[통똥][\s-]*샤를마뉴|corton[\s-]*charlemagne|클로\s*드\s*베즈|clos\s*de\s*b[eè]ze|(mazis|charmes|griotte|latrici[eè]res|ruchottes|chapelle|mazoy[eè]res)[\s-]*chambertin|본[\s-]*마르|bonnes[\s-]*mares|클로\s*(생[\s-]*드니|드\s*라\s*로쉬|드\s*타르|데\s*랑브레)|clos\s*(?:(?:saint|st\.?)[\s-]*denis|de\s*la\s*roche|de\s*tart|des\s*lambrays)/i;
 
 const STANDALONE_GRAND_CRU_RE =
   /\b(chambertin|musigny|corton|montrachet)\b|(^|[\s,])(샹베르탱|뮈지니|꼬르[통똥]|몽라쉐)([\s,]|$)/i;
@@ -42,9 +44,10 @@ const BORDEAUX_TOP_COMMUNES = new Set([
   '포므롤',
   '생떼밀리옹',
 ]);
+const BORDEAUX_TOP_COMMUNES_EN_RE =
+  /\b(pauillac|saint[\s-]*julien|st\.?[\s-]*julien|margaux|saint[\s-]*est[eè]phe|st\.?[\s-]*est[eè]phe|pessac[\s-]*l[eé]ognan|pomerol|saint[\s-]*[eé]milion|st\.?[\s-]*[eé]milion)\b/i;
+
 const BURGUNDY_RED_TOP_COMMUNES = new Set([
-  '에세죠',
-  '클로 드 부조',
   '본 로마네',
   '샹볼 뮈지니',
   '쥬브레 샹베르탱',
@@ -52,15 +55,21 @@ const BURGUNDY_RED_TOP_COMMUNES = new Set([
   '뉘 생 조르주',
   '볼네',
   '뽀마르',
+  '알록스 꼬르똥',
 ]);
+const BURGUNDY_RED_TOP_COMMUNES_EN_RE =
+  /\b(vosne[\s-]*roman[eé]e|chambolle[\s-]*musigny|gevrey[\s-]*chambertin|morey[\s-]*saint[\s-]*denis|nuits[\s-]*saint[\s-]*georges|volnay|pommard|aloxe[\s-]*corton)\b/i;
+
 const BURGUNDY_WHITE_TOP_COMMUNES = new Set([
   '뫼르소',
   '샤샤뉴 몽라쉐',
   '퓔리니 몽라쉐',
-  '꼬르통',
-  '꼬르똥',
   '본',
+  '알록스 꼬르똥',
 ]);
+const BURGUNDY_WHITE_TOP_COMMUNES_EN_RE =
+  /\b(meursault|chassagne[\s-]*montrachet|puligny[\s-]*montrachet|beaune|aloxe[\s-]*corton)\b/i;
+
 const NORTHERN_RHONE_COMMUNES = new Set([
   '코트 로티',
   '에르미타주',
@@ -73,6 +82,10 @@ function isBurgundyGrandCru(name: string, subRegion: string): boolean {
   const combined = `${name} ${subRegion}`;
   if (EXPLICIT_GRAND_CRU_RE.test(combined)) {
     return true;
+  }
+  // Aloxe-Corton 빌라쥬 와인이 기존 엑셀 subRegion='꼬르똥'과 결합해 그랑크뤼로 오탐되는 문제 차단
+  if (ALOXE_CORTON_RE.test(name) || ALOXE_CORTON_RE.test(subRegion)) {
+    return false;
   }
   const stripped = combined.replace(VILLAGE_HYPHEN_STRIP_RE, ' ');
   return STANDALONE_GRAND_CRU_RE.test(stripped);
@@ -94,7 +107,13 @@ export function estimateDrinkingWindow(
 
   // 1) NV (Non-Vintage)
   if (vintageClean === 'NV') {
-    const baseYear = input.referenceYear ?? new Date().getFullYear();
+    const baseYear =
+      typeof input.referenceYear === 'number' &&
+      Number.isInteger(input.referenceYear) &&
+      input.referenceYear >= 1900 &&
+      input.referenceYear <= 2100
+        ? input.referenceYear
+        : new Date().getFullYear();
     if (input.color === 'SP') {
       return { start: baseYear, end: baseYear + 3, basis: '상파뉴/스파클링 NV 기준' };
     }
@@ -157,6 +176,7 @@ export function estimateDrinkingWindow(
     } else {
       const isTopBordeaux =
         BORDEAUX_TOP_COMMUNES.has(subRegion) ||
+        BORDEAUX_TOP_COMMUNES_EN_RE.test(combinedText) ||
         /grand\s*cru|cru\s*class[eé]|그랑\s*크뤼/i.test(combinedText);
       startOffset = isTopBordeaux ? 8 : 4;
       endOffset = isTopBordeaux ? 25 : 12;
@@ -183,7 +203,11 @@ export function estimateDrinkingWindow(
         startOffset = 5;
         endOffset = 16;
         basis = '부르고뉴 화이트 그랑크뤼 기준';
-      } else if (isPremierCru || BURGUNDY_WHITE_TOP_COMMUNES.has(subRegion)) {
+      } else if (
+        isPremierCru ||
+        BURGUNDY_WHITE_TOP_COMMUNES.has(subRegion) ||
+        BURGUNDY_WHITE_TOP_COMMUNES_EN_RE.test(combinedText)
+      ) {
         startOffset = 4;
         endOffset = 12;
         basis = '부르고뉴 화이트 1er/주요 마을 기준';
@@ -202,7 +226,11 @@ export function estimateDrinkingWindow(
         startOffset = 7;
         endOffset = 22;
         basis = '부르고뉴 레드 그랑크뤼 기준';
-      } else if (isPremierCru || BURGUNDY_RED_TOP_COMMUNES.has(subRegion)) {
+      } else if (
+        isPremierCru ||
+        BURGUNDY_RED_TOP_COMMUNES.has(subRegion) ||
+        BURGUNDY_RED_TOP_COMMUNES_EN_RE.test(combinedText)
+      ) {
         startOffset = 5;
         endOffset = 16;
         basis = '부르고뉴 레드 1er/주요 마을 기준';
@@ -288,6 +316,10 @@ export function estimateDrinkingWindow(
       startOffset = 5;
       endOffset = 20;
       basis = '토스카나 빈 산토/스위트 기준';
+    } else if (/rosso\s+di\s+montalcino|로쏘\s*디\s*몬탈치노/i.test(combinedText)) {
+      startOffset = 2;
+      endOffset = 8;
+      basis = '토스카나 로쏘 디 몬탈치노 기준';
     } else if (subRegion === '몬탈치노' || /brunello|bdm|브루넬로/i.test(combinedText)) {
       startOffset = 7;
       endOffset = 22;
@@ -314,33 +346,55 @@ export function estimateDrinkingWindow(
     startOffset = 7;
     endOffset = 22;
     basis = '베네토 아마로네 기준';
-  } else if (region === '나파' || /napa|나파/i.test(combinedText)) {
+  } else if (
+    (country === '미국' || !country) &&
+    (region === '나파' || /\bnapa\b|나파/i.test(combinedText))
+  ) {
     if (input.color === 'R') {
       startOffset = 6;
       endOffset = 20;
       basis = '미국 나파 밸리(레드) 기준';
       vintageBucket = 'napa';
+    } else if (input.color === 'SW') {
+      startOffset = 5;
+      endOffset = 20;
+      basis = '미국 나파(스위트) 기준';
     } else {
       startOffset = 2;
       endOffset = 8;
       basis = '미국 나파(화이트) 기준';
     }
-  } else if (region === '오레곤' || region === '소노마') {
+  } else if ((country === '미국' || !country) && (region === '오레곤' || region === '소노마')) {
     if (input.color === 'R') {
       startOffset = 3;
       endOffset = 12;
       basis = `미국 ${region}(레드) 기준`;
+    } else if (input.color === 'SW') {
+      startOffset = 5;
+      endOffset = 20;
+      basis = `미국 ${region}(스위트) 기준`;
     } else {
       startOffset = 2;
       endOffset = 8;
       basis = `미국 ${region}(화이트) 기준`;
     }
   } else if (country === '미국') {
-    startOffset = input.color === 'R' ? 4 : 2;
-    endOffset = input.color === 'R' ? 14 : 7;
-    basis = input.color === 'R' ? '미국 레드 기준' : '미국 화이트/기타 기준';
+    if (input.color === 'SW') {
+      startOffset = 5;
+      endOffset = 20;
+      basis = '미국 스위트 기준';
+    } else {
+      startOffset = input.color === 'R' ? 4 : 2;
+      endOffset = input.color === 'R' ? 14 : 7;
+      basis = input.color === 'R' ? '미국 레드 기준' : '미국 화이트/기타 기준';
+    }
   } else if (country === '독일' || country === '오스트리아' || country === '헝가리') {
-    if (input.color === 'SW' || /auslese|beerenauslese|tba|eiswein|tokaji|토카이/i.test(combinedText)) {
+    const isExplicitDry = /\b(trocken|dry)\b|드라이/i.test(combinedText);
+    if (
+      input.color === 'SW' ||
+      (!isExplicitDry &&
+        /\b(auslese|beerenauslese|tba|eiswein|tokaji)\b|토카이/i.test(combinedText))
+    ) {
       startOffset = 7;
       endOffset = 28;
       basis = `${country} 스위트 리슬링/토카이 기준`;
@@ -354,7 +408,12 @@ export function estimateDrinkingWindow(
       basis = `${country} 레드 기준`;
     }
   } else if (country === '스페인' || country === '포르투갈') {
-    if (input.color === 'SW' || /port|포트|sherry|헤레스|madeira/i.test(combinedText)) {
+    if (
+      input.color === 'SW' ||
+      /\b(port|porto|vintage\s+port|tawny|ruby\s+port|lbv|sherry|madeira)\b|포트|헤레스/i.test(
+        combinedText,
+      )
+    ) {
       startOffset = 6;
       endOffset = 28;
       basis = `${country} 주정강화/스위트 기준`;

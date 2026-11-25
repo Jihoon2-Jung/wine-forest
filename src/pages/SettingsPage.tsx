@@ -17,16 +17,23 @@ import {
   UploadCloud,
 } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
-import { parseApprovedLabelsBundle, type ApprovedLabelsBundle } from '@/types/validation';
+import {
+  parseApprovedLabelsBundle,
+  parseWineDatabase,
+  type ApprovedLabelsBundle,
+} from '@/types/validation';
 import { buildWineLabelGroupKey } from '@/services/domain/wineHelpers';
 import { isGoogleAuthConfigured, isNativeAuth, isTokenValid } from '@/services/auth/googleAuth';
 import { useWineStore } from '@/store/useWineStore';
 import { BottomSheet } from '@/components/common/BottomSheet';
+import { ConfirmDialog } from '@/components/common/ConfirmDialog';
 
 export function SettingsPage() {
   const db = useWineStore((s) => s.db);
   const storageMode = useWineStore((s) => s.storageMode);
+  const syncStatus = useWineStore((s) => s.syncStatus);
   const googleConnected = useWineStore((s) => s.googleConnected);
+  const authRevision = useWineStore((s) => s.authRevision);
   const authUserEmail = useWineStore((s) => s.authUserEmail);
   const lastSyncedModifiedTime = useWineStore((s) => s.lastSyncedModifiedTime);
   const hasUnsyncedChanges = useWineStore((s) => s.hasUnsyncedChanges);
@@ -54,40 +61,70 @@ export function SettingsPage() {
   const labelsBundleInputRef = useRef<HTMLInputElement>(null);
   const [trackingDate, setTrackingDate] = useState(db?.metadata.trackingSinceDate ?? '2023-02-18');
   const [recalcAll, setRecalcAll] = useState(false);
+  const [actionBusy, setActionBusy] = useState(false);
   const [pendingLabelImport, setPendingLabelImport] = useState<{
     bundle: ApprovedLabelsBundle;
     overlapCount: number;
   } | null>(null);
+  const [confirmDialog, setConfirmDialog] = useState<{
+    title: string;
+    message: string;
+    confirmLabel: string;
+    tone?: 'primary' | 'danger';
+    onConfirm: () => Promise<void>;
+  } | null>(null);
+  const [confirmBusy, setConfirmBusy] = useState(false);
 
+  const dbTrackingSinceDate = db?.metadata.trackingSinceDate;
   useEffect(() => {
-    if (db) {
-      setTrackingDate(db.metadata.trackingSinceDate);
+    if (dbTrackingSinceDate) {
+      setTrackingDate(dbTrackingSinceDate);
     }
-  }, [db]);
+  }, [dbTrackingSinceDate]);
 
   useEffect(() => {
     void fetchBackups();
-  }, [fetchBackups, storageMode]);
+  }, [fetchBackups, storageMode, authRevision]);
 
   if (!db) return null;
 
   const clientIdReady = isGoogleAuthConfigured();
   const nativeMode = isNativeAuth();
   const tokenActive = isTokenValid();
-  const nativeAutoRefreshReady = nativeMode && (tokenActive || googleConnected);
+  const nativeAutoRefreshReady =
+    nativeMode && syncStatus !== 'auth_required' && (tokenActive || googleConnected);
   const missingDrinkingWindowCount = db.wines.filter(
     (w) => w.drinkingWindowStart == null && w.drinkingWindowEnd == null,
   ).length;
+  const isTrackingDateValid = /^\d{4}-\d{2}-\d{2}$/.test(trackingDate);
+
+  const runAction = async (fn: () => Promise<void>) => {
+    if (actionBusy) return;
+    setActionBusy(true);
+    try {
+      await fn();
+    } finally {
+      setActionBusy(false);
+    }
+  };
 
   const handleImportFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     e.target.value = '';
     if (!file) return;
-    if (!window.confirm('선택한 wine_db.json 파일로 현재 DB 전체를 덮어쓸까요?')) return;
     try {
       const text = await file.text();
       const parsed = JSON.parse(text) as unknown;
-      await importJsonDatabase(parsed);
+      const validated = parseWineDatabase(parsed);
+      setConfirmDialog({
+        title: 'JSON 파일로 DB 덮어쓰기',
+        message: `선택한 '${file.name}' (와인 ${validated.wines.length}종 · 병 ${validated.bottles.length}개)로 현재 DB 전체를 덮어쓸까요?`,
+        confirmLabel: '덮어쓰기',
+        tone: 'danger',
+        onConfirm: async () => {
+          await importJsonDatabase(validated);
+        },
+      });
     } catch (err) {
       const msg = err instanceof Error ? err.message : '유효하지 않은 JSON 형식입니다.';
       showToast(`가져오기 실패: ${msg}`, 'error');
@@ -148,24 +185,29 @@ export function SettingsPage() {
     });
   };
 
-  const handleRestore = async (fileId: string, name: string) => {
-    if (
-      window.confirm(
-        `'${name}' 시점으로 복원할까요?\n현재 DB는 자동으로 pre_restore 백업에 대피 저장된 뒤 복원됩니다.`,
-      )
-    ) {
-      await restoreFromBackup(fileId);
-    }
+  const handleRestore = (fileId: string, name: string) => {
+    setConfirmDialog({
+      title: '백업 스냅샷 복원',
+      message: `'${name}' 시점으로 복원할까요?\n현재 DB는 자동으로 pre_restore 백업에 대피 저장된 뒤 복원됩니다.`,
+      confirmLabel: '복원',
+      tone: 'primary',
+      onConfirm: async () => {
+        await restoreFromBackup(fileId);
+      },
+    });
   };
 
-  const handleReset = async () => {
-    if (
-      window.confirm(
+  const handleReset = () => {
+    setConfirmDialog({
+      title: '로컬 캐시 초기화',
+      message:
         '이 브라우저의 로컬 캐시와 연결 상태를 초기화하고 온보딩 화면으로 돌아갈까요?\n(Google Drive 파일은 삭제되지 않습니다.)',
-      )
-    ) {
-      await disconnectAndResetLocal();
-    }
+      confirmLabel: '초기화',
+      tone: 'danger',
+      onConfirm: async () => {
+        await disconnectAndResetLocal();
+      },
+    });
   };
 
   return (
@@ -207,7 +249,7 @@ export function SettingsPage() {
               storageMode === 'local_test'
                 ? 'bg-gold/15 text-gold'
                 : tokenActive || nativeAutoRefreshReady
-                  ? 'bg-[var(--status-ok)]/15 text-[var(--status-ok)]'
+                  ? 'bg-status-ok/15 text-status-ok'
                   : 'bg-elevated text-secondary'
             }`}
           >
@@ -226,16 +268,18 @@ export function SettingsPage() {
             <>
               <button
                 type="button"
-                onClick={() => void syncNow()}
-                className="inline-flex items-center gap-1.5 rounded-xl bg-forest px-3.5 py-2 text-xs font-bold text-white hover:bg-forest-hover"
+                disabled={actionBusy}
+                onClick={() => void runAction(syncNow)}
+                className="inline-flex items-center gap-1.5 rounded-xl bg-forest px-3.5 py-2 text-xs font-bold text-white hover:bg-forest-hover disabled:opacity-50"
               >
                 <RefreshCw className="h-3.5 w-3.5" />
                 <span>지금 동기화</span>
               </button>
               <button
                 type="button"
-                onClick={() => void reauthenticateAndSync()}
-                className="inline-flex items-center gap-1.5 rounded-xl border border-subtle bg-elevated px-3.5 py-2 text-xs font-bold text-primary hover:border-forest"
+                disabled={actionBusy}
+                onClick={() => void runAction(reauthenticateAndSync)}
+                className="inline-flex items-center gap-1.5 rounded-xl border border-subtle bg-elevated px-3.5 py-2 text-xs font-bold text-primary hover:border-forest disabled:opacity-50"
               >
                 <KeyRound className="h-3.5 w-3.5 text-forest" />
                 <span>구글 재인증</span>
@@ -246,9 +290,11 @@ export function SettingsPage() {
           <button
             type="button"
             onClick={() =>
-              void switchStorageMode(storageMode === 'google_drive' ? 'local_test' : 'google_drive')
+              void runAction(() =>
+                switchStorageMode(storageMode === 'google_drive' ? 'local_test' : 'google_drive'),
+              )
             }
-            disabled={storageMode === 'local_test' && !clientIdReady}
+            disabled={actionBusy || (storageMode === 'local_test' && !clientIdReady)}
             className="inline-flex items-center gap-1.5 rounded-xl border border-subtle bg-elevated px-3.5 py-2 text-xs font-semibold text-secondary hover:text-primary disabled:opacity-45"
           >
             <HardDrive className="h-3.5 w-3.5" />
@@ -282,15 +328,17 @@ export function SettingsPage() {
           <div className="flex gap-2">
             <button
               type="button"
-              onClick={() => void fetchBackups()}
-              className="rounded-xl border border-subtle bg-elevated px-3 py-2 text-xs font-semibold text-secondary hover:text-primary"
+              disabled={actionBusy}
+              onClick={() => void runAction(fetchBackups)}
+              className="rounded-xl border border-subtle bg-elevated px-3 py-2 text-xs font-semibold text-secondary hover:text-primary disabled:opacity-50"
             >
               새로고침
             </button>
             <button
               type="button"
-              onClick={() => void createManualBackup()}
-              className="inline-flex items-center gap-1.5 rounded-xl bg-forest px-3.5 py-2 text-xs font-bold text-white hover:bg-forest-hover"
+              disabled={actionBusy}
+              onClick={() => void runAction(createManualBackup)}
+              className="inline-flex items-center gap-1.5 rounded-xl bg-forest px-3.5 py-2 text-xs font-bold text-white hover:bg-forest-hover disabled:opacity-50"
             >
               <Save className="h-3.5 w-3.5" />
               <span>지금 수동 백업</span>
@@ -301,17 +349,20 @@ export function SettingsPage() {
         {isLoadingBackups ? (
           <div className="py-6 text-center text-xs text-secondary">백업 목록을 불러오는 중...</div>
         ) : storageMode === 'google_drive' && !tokenActive && !nativeAutoRefreshReady ? (
-          <div className="flex flex-col items-center gap-2.5 rounded-xl border border-[var(--status-warn)]/35 bg-[var(--status-warn)]/10 px-4 py-5 text-center">
+          <div className="flex flex-col items-center gap-2.5 rounded-xl border border-status-warn/35 bg-status-warn/10 px-4 py-5 text-center">
             <p className="text-xs font-semibold text-primary">
               구글 재인증 후 드라이브 백업 목록을 불러올 수 있습니다.
             </p>
             <button
               type="button"
-              onClick={async () => {
-                await reauthenticateAndSync();
-                await fetchBackups();
-              }}
-              className="inline-flex items-center gap-1.5 rounded-xl bg-forest px-3.5 py-2 text-xs font-bold text-white hover:bg-forest-hover"
+              disabled={actionBusy}
+              onClick={() =>
+                void runAction(async () => {
+                  await reauthenticateAndSync();
+                  await fetchBackups();
+                })
+              }
+              className="inline-flex items-center gap-1.5 rounded-xl bg-forest px-3.5 py-2 text-xs font-bold text-white hover:bg-forest-hover disabled:opacity-50"
             >
               <KeyRound className="h-3.5 w-3.5" />
               <span>구글 재인증 후 백업 조회</span>
@@ -420,15 +471,17 @@ export function SettingsPage() {
           <button
             type="button"
             disabled={missingDrinkingWindowCount === 0}
-            onClick={() => {
-              if (
-                window.confirm(
-                  `음용 적기가 비어 있는 ${missingDrinkingWindowCount}종 와인에 지역·빈티지 기준 추천 연도를 일괄 채울까요?\n(이미 직접 입력한 와인은 덮어쓰지 않습니다.)`,
-                )
-              ) {
-                void autoFillMissingDrinkingWindows();
-              }
-            }}
+            onClick={() =>
+              setConfirmDialog({
+                title: '음용 적기 일괄 자동 채우기',
+                message: `음용 적기가 비어 있는 ${missingDrinkingWindowCount}종 와인에 지역·빈티지 기준 추천 연도를 일괄 채울까요?\n(이미 직접 입력한 와인은 덮어쓰지 않습니다.)`,
+                confirmLabel: '자동 채우기',
+                tone: 'primary',
+                onConfirm: async () => {
+                  await autoFillMissingDrinkingWindows();
+                },
+              })
+            }
             className="inline-flex items-center gap-1.5 rounded-xl bg-forest px-3.5 py-2 text-xs font-bold text-white hover:bg-forest-hover disabled:cursor-not-allowed disabled:opacity-45"
           >
             <Sparkles className="h-3.5 w-3.5" />
@@ -456,12 +509,18 @@ export function SettingsPage() {
           />
           <button
             type="button"
-            onClick={() => void updateTrackingSinceDate(trackingDate, recalcAll)}
-            className="rounded-xl bg-forest px-3.5 py-2 text-xs font-bold text-white hover:bg-forest-hover"
+            disabled={actionBusy || !isTrackingDateValid}
+            onClick={() => void runAction(() => updateTrackingSinceDate(trackingDate, recalcAll))}
+            className="rounded-xl bg-forest px-3.5 py-2 text-xs font-bold text-white hover:bg-forest-hover disabled:cursor-not-allowed disabled:opacity-45"
           >
             기준일 저장
           </button>
         </div>
+        {!isTrackingDateValid && (
+          <p className="text-[11px] font-semibold text-status-danger">
+            유효한 날짜(YYYY-MM-DD)를 입력해 주세요.
+          </p>
+        )}
         <label className="flex items-center gap-2 text-xs text-secondary">
           <input
             type="checkbox"
@@ -473,16 +532,16 @@ export function SettingsPage() {
         </label>
       </section>
 
-      {/* 5. 로컬 캐시 초기화 */}
-      <section className="flex items-center justify-between gap-3 rounded-2xl border border-[var(--status-danger)]/30 bg-[var(--status-danger)]/5 p-4">
+      {/* 6. 로컬 캐시 초기화 */}
+      <section className="flex items-center justify-between gap-3 rounded-2xl border border-status-danger/30 bg-status-danger/5 p-4">
         <div>
-          <h3 className="text-xs font-bold text-[var(--status-danger)]">로컬 캐시 초기화</h3>
+          <h3 className="text-xs font-bold text-status-danger">로컬 캐시 초기화</h3>
           <p className="text-[11px] text-secondary">브라우저 캐시를 비우고 온보딩 화면으로 돌아갑니다.</p>
         </div>
         <button
           type="button"
-          onClick={() => void handleReset()}
-          className="inline-flex shrink-0 items-center gap-1.5 rounded-xl border border-[var(--status-danger)]/40 bg-surface px-3 py-2 text-xs font-bold text-[var(--status-danger)] hover:bg-[var(--status-danger)] hover:text-white"
+          onClick={handleReset}
+          className="inline-flex shrink-0 items-center gap-1.5 rounded-xl border border-status-danger/40 bg-surface px-3 py-2 text-xs font-bold text-status-danger hover:bg-status-danger hover:text-white"
         >
           <Trash2 className="h-3.5 w-3.5" />
           <span>초기화</span>
@@ -555,8 +614,9 @@ export function SettingsPage() {
           )}
           <button
             type="button"
-            onClick={() => void resolveModeSwitchConflict('use_remote')}
-            className="flex w-full items-center gap-3 rounded-xl bg-forest px-4 py-3 text-left text-white hover:bg-forest-hover"
+            disabled={actionBusy}
+            onClick={() => void runAction(() => resolveModeSwitchConflict('use_remote'))}
+            className="flex w-full items-center gap-3 rounded-xl bg-forest px-4 py-3 text-left text-white hover:bg-forest-hover disabled:opacity-50"
           >
             <CloudDownload className="h-5 w-5 shrink-0" />
             <div>
@@ -566,8 +626,9 @@ export function SettingsPage() {
           </button>
           <button
             type="button"
-            onClick={() => void resolveModeSwitchConflict('overwrite_remote')}
-            className="flex w-full items-center gap-3 rounded-xl border border-burgundy/40 bg-burgundy/10 px-4 py-3 text-left text-primary hover:bg-burgundy/15"
+            disabled={actionBusy}
+            onClick={() => void runAction(() => resolveModeSwitchConflict('overwrite_remote'))}
+            className="flex w-full items-center gap-3 rounded-xl border border-burgundy/40 bg-burgundy/10 px-4 py-3 text-left text-primary hover:bg-burgundy/15 disabled:opacity-50"
           >
             <UploadCloud className="h-5 w-5 shrink-0 text-burgundy" />
             <div>
@@ -579,13 +640,34 @@ export function SettingsPage() {
           </button>
           <button
             type="button"
-            onClick={() => void resolveModeSwitchConflict('cancel')}
-            className="w-full rounded-xl border border-subtle bg-elevated py-2.5 text-xs font-bold text-secondary hover:text-primary"
+            disabled={actionBusy}
+            onClick={() => void runAction(() => resolveModeSwitchConflict('cancel'))}
+            className="w-full rounded-xl border border-subtle bg-elevated py-2.5 text-xs font-bold text-secondary hover:text-primary disabled:opacity-50"
           >
             취소 (로컬 테스트 모드 유지)
           </button>
         </div>
       </BottomSheet>
+
+      <ConfirmDialog
+        open={Boolean(confirmDialog)}
+        title={confirmDialog?.title ?? ''}
+        message={confirmDialog?.message ?? ''}
+        confirmLabel={confirmDialog?.confirmLabel}
+        tone={confirmDialog?.tone}
+        busy={confirmBusy}
+        onCancel={() => setConfirmDialog(null)}
+        onConfirm={async () => {
+          if (!confirmDialog || confirmBusy) return;
+          setConfirmBusy(true);
+          try {
+            await confirmDialog.onConfirm();
+            setConfirmDialog(null);
+          } finally {
+            setConfirmBusy(false);
+          }
+        }}
+      />
     </div>
   );
 }

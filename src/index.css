@@ -9,6 +9,7 @@
   body {
     background-color: var(--bg-canvas);
     color: var(--text-primary);
+    overflow-x: clip;
     font-family:
       'Pretendard',
       -apple-system,
@@ -33,9 +34,11 @@
 }
 
 /* Safe area padding for iOS standalone PWA */
-.pb-safe {
-  padding-bottom: env(safe-area-inset-bottom, 0px);
-}
-.pt-safe {
-  padding-top: env(safe-area-inset-top, 0px);
+@layer utilities {
+  .pb-safe {
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+  .pt-safe {
+    padding-top: env(safe-area-inset-top, 0px);
+  }
 }

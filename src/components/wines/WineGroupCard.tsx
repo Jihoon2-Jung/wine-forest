@@ -52,6 +52,7 @@ export function WineGroupCard({
         role="button"
         tabIndex={0}
         onKeyDown={(e) => {
+          if (e.target !== e.currentTarget) return;
           if (e.key === 'Enter' || e.key === ' ') {
             e.preventDefault();
             onOpenDetail(wine.id);
@@ -88,7 +89,7 @@ export function WineGroupCard({
         <span
           className={`shrink-0 rounded-lg px-2 py-1 text-xs font-extrabold tabular-nums ${
             count > 0
-              ? 'bg-forest/12 text-forest'
+              ? 'bg-forest/[0.12] text-forest'
               : 'bg-elevated text-secondary'
           }`}
         >
@@ -101,7 +102,7 @@ export function WineGroupCard({
               e.stopPropagation();
               onQuickConsume(group);
             }}
-            className="shrink-0 rounded-lg bg-burgundy/12 p-1.5 text-burgundy transition-colors hover:bg-burgundy hover:text-white"
+            className="shrink-0 rounded-lg bg-burgundy/[0.12] p-1.5 text-burgundy transition-colors hover:bg-burgundy hover:text-white"
             title="빠른 소비 / 선물"
             aria-label={`${wine.name} 빠른 소비`}
           >
@@ -118,12 +119,13 @@ export function WineGroupCard({
       role="button"
       tabIndex={0}
       onKeyDown={(e) => {
+        if (e.target !== e.currentTarget) return;
         if (e.key === 'Enter' || e.key === ' ') {
           e.preventDefault();
           onOpenDetail(wine.id);
         }
       }}
-      className={`group relative flex cursor-pointer gap-3 rounded-2xl border border-subtle bg-surface p-3.5 shadow-card transition-all hover:border-forest/45 hover:shadow-card-hover ${
+      className={`group relative flex min-w-0 cursor-pointer gap-3 overflow-hidden rounded-2xl border border-subtle bg-surface p-3.5 shadow-card transition-all hover:border-forest/45 hover:shadow-card-hover ${
         count === 0 ? 'opacity-70' : ''
       }`}
     >
@@ -138,7 +140,7 @@ export function WineGroupCard({
       {/* 중앙 메타 정보 */}
       <div className="flex min-w-0 flex-1 flex-col justify-between gap-1.5">
         <div>
-          <div className="flex items-center gap-1.5">
+          <div className="flex flex-wrap items-center gap-1.5">
             <WineColorBadge color={wine.color} />
             <span className="font-serif text-xs font-bold tabular-nums text-gold">
               {wine.vintage}
@@ -194,7 +196,7 @@ export function WineGroupCard({
         <span
           className={`inline-flex min-w-[2.4rem] items-center justify-center rounded-xl px-2 py-1 text-xs font-extrabold tabular-nums ${
             count > 0
-              ? 'bg-forest/12 text-forest'
+              ? 'bg-forest/[0.12] text-forest'
               : 'bg-elevated text-secondary'
           }`}
         >
@@ -208,7 +210,7 @@ export function WineGroupCard({
               e.stopPropagation();
               onQuickConsume(group);
             }}
-            className="flex h-8 w-8 items-center justify-center rounded-xl bg-burgundy/12 text-burgundy transition-colors hover:bg-burgundy hover:text-white active:scale-95"
+            className="flex h-8 w-8 items-center justify-center rounded-xl bg-burgundy/[0.12] text-burgundy transition-colors hover:bg-burgundy hover:text-white active:scale-95"
             title="빠른 소비 / 선물"
             aria-label={`${wine.name} 빠른 소비`}
           >

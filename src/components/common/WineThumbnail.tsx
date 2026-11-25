@@ -30,7 +30,7 @@ export function WineThumbnail({
       ? 'w-11 h-16'
       : size === 'lg'
         ? 'w-16 h-24'
-        : 'w-13 h-[74px]';
+        : 'w-[52px] h-[74px]';
 
   const hasPhoto = Boolean(photoUrl);
 
@@ -49,7 +49,7 @@ export function WineThumbnail({
             }
           : undefined
       }
-      className={`relative shrink-0 overflow-hidden rounded-xl border border-subtle bg-elevated flex flex-col items-center justify-center select-none ${dims} ${
+      className={`relative flex-none shrink-0 overflow-hidden rounded-xl border border-subtle bg-elevated flex flex-col items-center justify-center select-none ${dims} ${
         onClick ? 'cursor-pointer transition-opacity hover:opacity-90' : ''
       }`}
       style={{
@@ -60,14 +60,14 @@ export function WineThumbnail({
         <img
           src={photoUrl}
           alt="와인 라벨"
-          className="h-full w-full object-cover"
+          className="block h-full w-full max-h-full max-w-full object-cover"
           loading="lazy"
         />
       ) : (
         <>
           <svg
             viewBox="0 0 36 72"
-            className={size === 'sm' ? 'h-11 w-6' : size === 'lg' ? 'h-16 w-8' : 'h-13 w-7'}
+            className={size === 'sm' ? 'h-11 w-6' : size === 'lg' ? 'h-16 w-8' : 'h-[52px] w-7'}
             fill="none"
             aria-hidden="true"
           >

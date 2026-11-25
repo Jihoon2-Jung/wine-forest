@@ -69,7 +69,7 @@ export function DesktopSidebar() {
             className={({ isActive }) =>
               `flex items-center gap-3 rounded-xl px-3.5 py-2.5 text-sm font-semibold transition-colors ${
                 isActive
-                  ? 'bg-forest/12 text-forest'
+                  ? 'bg-forest/[0.12] text-forest'
                   : 'text-secondary hover:bg-elevated hover:text-primary'
               }`
             }
@@ -88,7 +88,7 @@ export function DesktopSidebar() {
             onClick={togglePrivacyMode}
             className={`flex items-center justify-center gap-1.5 rounded-xl border px-2.5 py-2 text-xs font-semibold transition-colors ${
               isPrivacyMode
-                ? 'border-burgundy/40 bg-burgundy/12 text-burgundy'
+                ? 'border-burgundy/40 bg-burgundy/[0.12] text-burgundy'
                 : 'border-subtle bg-elevated text-secondary hover:text-primary'
             }`}
           >

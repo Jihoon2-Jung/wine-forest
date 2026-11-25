@@ -1,6 +1,56 @@
 import { useEffect, useRef, type ReactNode } from 'react';
 import { X } from 'lucide-react';
 
+interface ModalStackEntry {
+  id: symbol;
+  isDismissible: () => boolean;
+  onEscape: () => void;
+}
+
+const modalStack: ModalStackEntry[] = [];
+let savedBodyOverflow: string | null = null;
+let keydownBound = false;
+
+function handleGlobalModalKeyDown(e: KeyboardEvent) {
+  if (e.key !== 'Escape') return;
+  const top = modalStack[modalStack.length - 1];
+  if (top && top.isDismissible()) {
+    e.preventDefault();
+    top.onEscape();
+  }
+}
+
+export function registerModalLayer(
+  isDismissible: () => boolean,
+  onEscape: () => void,
+): () => void {
+  const id = Symbol('modal');
+  if (modalStack.length === 0) {
+    savedBodyOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+  }
+  modalStack.push({ id, isDismissible, onEscape });
+  if (!keydownBound) {
+    document.addEventListener('keydown', handleGlobalModalKeyDown);
+    keydownBound = true;
+  }
+
+  return () => {
+    const idx = modalStack.findIndex((entry) => entry.id === id);
+    if (idx !== -1) {
+      modalStack.splice(idx, 1);
+    }
+    if (modalStack.length === 0) {
+      document.body.style.overflow = savedBodyOverflow ?? '';
+      savedBodyOverflow = null;
+      if (keydownBound) {
+        document.removeEventListener('keydown', handleGlobalModalKeyDown);
+        keydownBound = false;
+      }
+    }
+  };
+}
+
 interface BottomSheetProps {
   open: boolean;
   onClose: () => void;
@@ -24,22 +74,16 @@ export function BottomSheet({
 }: BottomSheetProps) {
   const latestOnCloseRef = useRef(onClose);
   latestOnCloseRef.current = onClose;
+  const dismissibleRef = useRef(dismissible);
+  dismissibleRef.current = dismissible;
 
   useEffect(() => {
     if (!open) return;
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && dismissible) {
-        latestOnCloseRef.current();
-      }
-    };
-    document.addEventListener('keydown', onKeyDown);
-    const prevOverflow = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
-    return () => {
-      document.removeEventListener('keydown', onKeyDown);
-      document.body.style.overflow = prevOverflow;
-    };
-  }, [open, dismissible]);
+    return registerModalLayer(
+      () => dismissibleRef.current,
+      () => latestOnCloseRef.current(),
+    );
+  }, [open]);
 
   if (!open) return null;
 
@@ -101,7 +145,9 @@ export function BottomSheet({
 
         {/* Footer */}
         {footer && (
-          <div className="border-t border-subtle bg-surface px-5 py-3.5 pb-safe">{footer}</div>
+          <div className="border-t border-subtle bg-surface px-5 pt-3.5 pb-[calc(0.875rem+env(safe-area-inset-bottom,0px))]">
+            {footer}
+          </div>
         )}
       </div>
     </div>

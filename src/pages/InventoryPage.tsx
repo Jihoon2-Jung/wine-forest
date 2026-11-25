@@ -1,4 +1,4 @@
-import { LayoutGrid, List, Plus, Wine } from 'lucide-react';
+import { LayoutGrid, List, Plus, RotateCcw, Wine } from 'lucide-react';
 import { useDeferredValue, useMemo, useState } from 'react';
 import type { BottleInstance } from '@/types/schema';
 import { calculateWineGroupPrice } from '@/services/analytics/statsCalculator';
@@ -13,10 +13,11 @@ import { WineGroupCard, type WineGroupItem } from '@/components/wines/WineGroupC
 export function InventoryPage() {
   const db = useWineStore((s) => s.db);
   const filters = useWineStore((s) => s.filters);
+  const resetFilters = useWineStore((s) => s.resetFilters);
   const openQuickAdd = useWineStore((s) => s.openQuickAdd);
 
   const [selectedWineId, setSelectedWineId] = useState<string | null>(null);
-  const [quickConsumeGroup, setQuickConsumeGroup] = useState<WineGroupItem | null>(null);
+  const [quickConsumeWineId, setQuickConsumeWineId] = useState<string | null>(null);
   const [compactView, setCompactView] = useState(false);
 
   const deferredQuery = useDeferredValue(filters.query.trim().toLowerCase());
@@ -160,7 +161,23 @@ export function InventoryPage() {
     };
   }, [db, filters, deferredQuery]);
 
+  const quickConsumeTarget = useMemo(() => {
+    if (!db || !quickConsumeWineId) return null;
+    const fromGroups = groups.find((g) => g.wine.id === quickConsumeWineId);
+    if (fromGroups) {
+      return { wine: fromGroups.wine, bottles: fromGroups.inStockBottles };
+    }
+    const wine = db.wines.find((w) => w.id === quickConsumeWineId) ?? null;
+    if (!wine) return null;
+    const bottles = db.bottles.filter(
+      (b) => b.wineId === quickConsumeWineId && b.status === 'IN_STOCK',
+    );
+    return { wine, bottles };
+  }, [db, groups, quickConsumeWineId]);
+
   if (!db) return null;
+
+  const hasAnyWineInCellar = db.wines.length > 0;
 
   return (
     <div className="space-y-4">
@@ -211,18 +228,34 @@ export function InventoryPage() {
           <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-forest/10 text-forest">
             <Wine className="h-7 w-7" />
           </div>
-          <h3 className="mt-4 text-base font-bold text-primary">표시할 와인이 없습니다</h3>
+          <h3 className="mt-4 text-base font-bold text-primary">
+            {hasAnyWineInCellar ? '조건에 맞는 와인이 없습니다' : '표시할 와인이 없습니다'}
+          </h3>
           <p className="mt-1 max-w-sm text-xs text-secondary">
-            검색어나 필터 조건을 조정하거나 새로운 와인을 셀러에 입고해 보세요.
+            {hasAnyWineInCellar
+              ? '검색어나 필터 조건을 초기화하거나 완화해 보세요.'
+              : '새로운 와인을 셀러에 입고해 보세요.'}
           </p>
-          <button
-            type="button"
-            onClick={() => openQuickAdd(null)}
-            className="mt-4 inline-flex items-center gap-1.5 rounded-xl bg-forest px-4 py-2.5 text-sm font-bold text-white hover:bg-forest-hover"
-          >
-            <Plus className="h-4 w-4" />
-            <span>첫 와인 입고하기</span>
-          </button>
+          <div className="mt-4 flex flex-wrap items-center justify-center gap-2">
+            {hasAnyWineInCellar && (
+              <button
+                type="button"
+                onClick={resetFilters}
+                className="inline-flex items-center gap-1.5 rounded-xl border border-subtle bg-surface px-4 py-2.5 text-sm font-bold text-primary hover:bg-elevated"
+              >
+                <RotateCcw className="h-4 w-4" />
+                <span>필터 초기화</span>
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => openQuickAdd(null)}
+              className="inline-flex items-center gap-1.5 rounded-xl bg-forest px-4 py-2.5 text-sm font-bold text-white hover:bg-forest-hover"
+            >
+              <Plus className="h-4 w-4" />
+              <span>{hasAnyWineInCellar ? '와인 입고하기' : '첫 와인 입고하기'}</span>
+            </button>
+          </div>
         </div>
       ) : compactView ? (
         <div className="space-y-2">
@@ -232,7 +265,7 @@ export function InventoryPage() {
               group={group}
               compact
               onOpenDetail={setSelectedWineId}
-              onQuickConsume={setQuickConsumeGroup}
+              onQuickConsume={(g) => setQuickConsumeWineId(g.wine.id)}
             />
           ))}
         </div>
@@ -243,7 +276,7 @@ export function InventoryPage() {
               key={group.wine.id}
               group={group}
               onOpenDetail={setSelectedWineId}
-              onQuickConsume={setQuickConsumeGroup}
+              onQuickConsume={(g) => setQuickConsumeWineId(g.wine.id)}
             />
           ))}
         </div>
@@ -254,10 +287,10 @@ export function InventoryPage() {
 
       {/* 빠른 소비/선물 모달 */}
       <QuickConsumeModal
-        open={Boolean(quickConsumeGroup)}
-        wine={quickConsumeGroup?.wine ?? null}
-        bottles={quickConsumeGroup?.inStockBottles ?? []}
-        onClose={() => setQuickConsumeGroup(null)}
+        open={Boolean(quickConsumeTarget)}
+        wine={quickConsumeTarget?.wine ?? null}
+        bottles={quickConsumeTarget?.bottles ?? []}
+        onClose={() => setQuickConsumeWineId(null)}
       />
     </div>
   );

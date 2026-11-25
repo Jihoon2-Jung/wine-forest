@@ -3,65 +3,105 @@
 :root,
 [data-theme='light'] {
   --bg-canvas: #faf9f6;
+  --bg-canvas-rgb: 250 249 246;
   --bg-surface: #ffffff;
+  --bg-surface-rgb: 255 255 255;
   --bg-elevated: #f2efe9;
+  --bg-elevated-rgb: 242 239 233;
   --border-subtle: #e6e2d8;
+  --border-subtle-rgb: 230 226 216;
 
   --text-primary: #1a211d;
+  --text-primary-rgb: 26 33 29;
   --text-secondary: #55615b;
+  --text-secondary-rgb: 85 97 91;
   --text-muted: #7f8b85;
+  --text-muted-rgb: 127 139 133;
 
   --brand-forest: #1b4332;
+  --brand-forest-rgb: 27 67 50;
   --brand-forest-hover: #2d6a4f;
+  --brand-forest-hover-rgb: 45 106 79;
   --brand-burgundy: #722f37;
+  --brand-burgundy-rgb: 114 47 55;
   --brand-gold: #b58d24;
+  --brand-gold-rgb: 181 141 36;
 
   /* Wine Color 5-type semantic badges (WCAG AA) */
   --wine-r: #8b2635;
+  --wine-r-rgb: 139 38 53;
   --wine-w: #f3eed4;
+  --wine-w-rgb: 243 238 212;
   --wine-w-border: #d5cba2;
   --wine-w-fg: #3b3520;
   --wine-sp: #4e95b3;
+  --wine-sp-rgb: 78 149 179;
   --wine-sw: #c97a2b;
+  --wine-sw-rgb: 201 122 43;
   --wine-ro: #d16b86;
+  --wine-ro-rgb: 209 107 134;
 
   /* Status tokens */
   --status-ok: #2d6a4f;
+  --status-ok-rgb: 45 106 79;
   --status-warn: #c97a2b;
+  --status-warn-rgb: 201 122 43;
   --status-danger: #b53844;
+  --status-danger-rgb: 181 56 68;
   --status-neutral: #6b7670;
+  --status-neutral-rgb: 107 118 112;
 
   color-scheme: light;
 }
 
 [data-theme='dark'] {
   --bg-canvas: #0d1411;
+  --bg-canvas-rgb: 13 20 17;
   --bg-surface: #15201b;
+  --bg-surface-rgb: 21 32 27;
   --bg-elevated: #1e2e27;
+  --bg-elevated-rgb: 30 46 39;
   --border-subtle: #273931;
+  --border-subtle-rgb: 39 57 49;
 
   --text-primary: #f2f6f3;
+  --text-primary-rgb: 242 246 243;
   --text-secondary: #9fb0a7;
+  --text-secondary-rgb: 159 176 167;
   --text-muted: #6e8077;
+  --text-muted-rgb: 110 128 119;
 
   --brand-forest: #40916c;
+  --brand-forest-rgb: 64 145 108;
   --brand-forest-hover: #52b788;
+  --brand-forest-hover-rgb: 82 183 136;
   --brand-burgundy: #b55460;
+  --brand-burgundy-rgb: 181 84 96;
   --brand-gold: #d4af37;
+  --brand-gold-rgb: 212 175 55;
 
   /* Wine Color 5-type semantic badges (Dark adjusted for WCAG AA) */
   --wine-r: #c94a63;
+  --wine-r-rgb: 201 74 99;
   --wine-w: #efead0;
+  --wine-w-rgb: 239 234 208;
   --wine-w-border: #c9c097;
   --wine-w-fg: #262214;
   --wine-sp: #6eb5d3;
+  --wine-sp-rgb: 110 181 211;
   --wine-sw: #e69242;
+  --wine-sw-rgb: 230 146 66;
   --wine-ro: #ea8da5;
+  --wine-ro-rgb: 234 141 165;
 
   --status-ok: #52b788;
+  --status-ok-rgb: 82 183 136;
   --status-warn: #e69242;
+  --status-warn-rgb: 230 146 66;
   --status-danger: #e05a67;
+  --status-danger-rgb: 224 90 103;
   --status-neutral: #84968c;
+  --status-neutral-rgb: 132 150 140;
 
   color-scheme: dark;
 }

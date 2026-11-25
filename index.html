@@ -12,10 +12,18 @@
     <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
     <link
       rel="stylesheet"
-      as="style"
+      media="print"
+      onload="this.media='all'"
       crossorigin
       href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css"
     />
+    <noscript>
+      <link
+        rel="stylesheet"
+        crossorigin
+        href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css"
+      />
+    </noscript>
     <script src="https://accounts.google.com/gsi/client" async defer></script>
   </head>
   <body class="bg-canvas text-primary antialiased selection:bg-forest/20">

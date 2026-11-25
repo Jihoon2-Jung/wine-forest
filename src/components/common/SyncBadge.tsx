@@ -35,7 +35,7 @@ export function SyncBadge({ compact = false }: { compact?: boolean }) {
     synced: {
       icon: CheckCircle2,
       label: '동기화됨',
-      cls: 'border-[var(--status-ok)]/30 bg-[var(--status-ok)]/10 text-[var(--status-ok)]',
+      cls: 'border-status-ok/30 bg-status-ok/10 text-status-ok',
       spin: false,
     },
     offline_cache: {
@@ -53,19 +53,19 @@ export function SyncBadge({ compact = false }: { compact?: boolean }) {
     auth_required: {
       icon: KeyRound,
       label: hasUnsyncedChanges ? '재인증·저장 필요' : '재인증 필요',
-      cls: 'border-[var(--status-warn)]/40 bg-[var(--status-warn)]/15 text-[var(--status-warn)]',
+      cls: 'border-status-warn/40 bg-status-warn/15 text-status-warn',
       spin: false,
     },
     conflict: {
       icon: AlertTriangle,
       label: '충돌 발생',
-      cls: 'border-[var(--status-danger)]/40 bg-[var(--status-danger)]/15 text-[var(--status-danger)]',
+      cls: 'border-status-danger/40 bg-status-danger/15 text-status-danger',
       spin: false,
     },
     error: {
       icon: AlertTriangle,
       label: '동기화 오류',
-      cls: 'border-[var(--status-danger)]/40 bg-[var(--status-danger)]/15 text-[var(--status-danger)]',
+      cls: 'border-status-danger/40 bg-status-danger/15 text-status-danger',
       spin: false,
     },
   }[syncStatus];

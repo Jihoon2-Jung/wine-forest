@@ -70,6 +70,10 @@ jobs:
           if [ -z "$BUNDLE_ID" ]; then
             BUNDLE_ID="com.jihoon.wineforest"
           fi
+          if ! [[ "$BUNDLE_ID" =~ ^[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)+$ ]]; then
+            echo "::error::bundle_id 형식이 올바르지 않습니다 (예: com.jihoon.wineforest)."
+            exit 1
+          fi
 
           if [ -z "$CLIENT_ID" ]; then
             if [ "$ALLOW_MISSING_OAUTH" = "true" ]; then
@@ -88,14 +92,15 @@ jobs:
               exit 1
             fi
 
+            PREFIX="${CLIENT_ID%.apps.googleusercontent.com}"
+            EXPECTED_REVERSED="com.googleusercontent.apps.${PREFIX}"
             if [ -z "$REVERSED_ID" ]; then
-              PREFIX="${CLIENT_ID%.apps.googleusercontent.com}"
-              REVERSED_ID="com.googleusercontent.apps.${PREFIX}"
+              REVERSED_ID="$EXPECTED_REVERSED"
               echo "Derived GOOGLE_IOS_REVERSED_CLIENT_ID automatically from GOOGLE_IOS_CLIENT_ID."
             fi
 
-            if [[ "$REVERSED_ID" != com.googleusercontent.apps.* ]]; then
-              echo "::error::GOOGLE_IOS_REVERSED_CLIENT_ID 형식이 올바르지 않습니다. 'com.googleusercontent.apps.'로 시작해야 합니다."
+            if [[ "$REVERSED_ID" != com.googleusercontent.apps.* ]] || [ "$REVERSED_ID" != "$EXPECTED_REVERSED" ]; then
+              echo "::error::GOOGLE_IOS_REVERSED_CLIENT_ID가 GOOGLE_IOS_CLIENT_ID와 일치하지 않습니다."
               exit 1
             fi
 

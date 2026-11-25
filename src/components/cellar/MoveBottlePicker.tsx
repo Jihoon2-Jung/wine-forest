@@ -1,5 +1,5 @@
 import { Check, MapPin } from 'lucide-react';
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { useWineStore } from '@/store/useWineStore';
 import { BottomSheet } from '@/components/common/BottomSheet';
 
@@ -20,6 +20,7 @@ export function MoveBottlePicker({
 }: MoveBottlePickerProps) {
   const db = useWineStore((s) => s.db);
   const moveBottle = useWineStore((s) => s.moveBottle);
+  const [busy, setBusy] = useState(false);
 
   const grouped = useMemo(() => {
     if (!db) return [];
@@ -55,8 +56,14 @@ export function MoveBottlePicker({
   if (!open || !bottleId) return null;
 
   const handleSelect = async (locationId: string | null) => {
-    await moveBottle(bottleId, locationId);
-    onClose();
+    if (busy) return;
+    setBusy(true);
+    try {
+      await moveBottle(bottleId, locationId);
+      onClose();
+    } finally {
+      setBusy(false);
+    }
   };
 
   return (
@@ -69,8 +76,9 @@ export function MoveBottlePicker({
       <div className="space-y-4">
         <button
           type="button"
+          disabled={busy}
           onClick={() => void handleSelect(null)}
-          className={`flex w-full items-center justify-between rounded-xl border px-3.5 py-2.5 text-sm transition-colors ${
+          className={`flex w-full items-center justify-between rounded-xl border px-3.5 py-2.5 text-sm transition-colors disabled:opacity-50 ${
             currentLocationId === null
               ? 'border-forest bg-forest/10 font-bold text-forest'
               : 'border-subtle bg-elevated text-secondary hover:text-primary'
@@ -92,17 +100,18 @@ export function MoveBottlePicker({
                 const isCurrent = loc.id === currentLocationId;
                 const statusColor =
                   remain < 0
-                    ? 'text-[var(--status-danger)]'
+                    ? 'text-status-danger'
                     : remain === 0
                       ? 'text-secondary'
-                      : 'text-[var(--status-ok)]';
+                      : 'text-status-ok';
 
                 return (
                   <button
                     key={loc.id}
                     type="button"
+                    disabled={busy}
                     onClick={() => void handleSelect(loc.id)}
-                    className={`flex flex-col items-start rounded-xl border px-3 py-2 text-left transition-colors ${
+                    className={`flex flex-col items-start rounded-xl border px-3 py-2 text-left transition-colors disabled:opacity-50 ${
                       isCurrent
                         ? 'border-forest bg-forest/10 ring-1 ring-forest/30'
                         : 'border-subtle bg-surface hover:border-forest/50 hover:bg-elevated'
@@ -115,7 +124,7 @@ export function MoveBottlePicker({
                       {isCurrent && <Check className="h-3.5 w-3.5 shrink-0 text-forest" />}
                     </div>
                     <span className={`mt-0.5 text-[11px] font-medium tabular-nums ${statusColor}`}>
-                      {loc.used}/{loc.maxCapacity} ({remain >= 0 ? `여유 ${remain}` : `초과 ${remain}`})
+                      {loc.used}/{loc.maxCapacity} ({remain >= 0 ? `여유 ${remain}` : `초과 +${Math.abs(remain)}`})
                     </span>
                   </button>
                 );

@@ -4,6 +4,19 @@ import type { WineDatabase } from './schema';
 const isoDateOnlyRegex = /^\d{4}-\d{2}-\d{2}$/;
 const vintageRegex = /^(\d{4}|NV)$/;
 
+function isValidIsoCalendarDate(value: string): boolean {
+  if (!isoDateOnlyRegex.test(value)) return false;
+  const [y, m, d] = value.split('-').map(Number);
+  if (m < 1 || m > 12 || d < 1 || d > 31) return false;
+  const dt = new Date(Date.UTC(y, m - 1, d));
+  return dt.getUTCFullYear() === y && dt.getUTCMonth() === m - 1 && dt.getUTCDate() === d;
+}
+
+const isoDateOnlySchema = z
+  .string()
+  .regex(isoDateOnlyRegex, 'YYYY-MM-DD 형식이어야 합니다')
+  .refine(isValidIsoCalendarDate, '유효한 달력 날짜가 아닙니다');
+
 export const wineColorSchema = z.enum(['R', 'W', 'SP', 'SW', 'RO']);
 export const bottleStatusSchema = z.enum(['IN_STOCK', 'CONSUMED', 'GIFTED']);
 
@@ -49,7 +62,7 @@ export const bottleInstanceSchema = z.object({
   wineId: z.string().min(1),
   status: bottleStatusSchema,
   locationId: z.string().min(1).nullable(),
-  purchaseDate: z.string().regex(isoDateOnlyRegex, 'YYYY-MM-DD 형식이어야 합니다').nullable(),
+  purchaseDate: isoDateOnlySchema.nullable(),
   purchaseDateUncertain: z.boolean().optional(),
   purchaseSource: z.string(),
   purchasePrice: z.number().int().min(0),
@@ -65,7 +78,7 @@ export const tastingRecordSchema = z.object({
   id: z.string().min(1),
   bottleId: z.string().min(1),
   type: z.enum(['CONSUMED', 'GIFTED']),
-  eventDate: z.string().regex(isoDateOnlyRegex, 'YYYY-MM-DD 형식이어야 합니다').nullable(),
+  eventDate: isoDateOnlySchema.nullable(),
   occasion: z.string().optional(),
   memo: z.string().optional(),
   companions: z.string().optional(),
@@ -78,7 +91,7 @@ export const tastingRecordSchema = z.object({
 export const appMetadataSchema = z.object({
   schemaVersion: z.literal(1),
   appName: z.literal('JH Wine Forest'),
-  trackingSinceDate: z.string().regex(isoDateOnlyRegex, 'YYYY-MM-DD 형식이어야 합니다'),
+  trackingSinceDate: isoDateOnlySchema,
   lastModifiedAt: z.string().min(1),
   lastBackupAt: z.string().nullable(),
   deviceLabel: z.string().optional(),
@@ -93,11 +106,41 @@ export const wineDatabaseSchema = z
     tastings: z.array(tastingRecordSchema),
   })
   .superRefine((db, ctx) => {
-    const wineIds = new Set(db.wines.map((w) => w.id));
-    const locationIds = new Set(db.locations.map((l) => l.id));
-    const bottleIds = new Set(db.bottles.map((b) => b.id));
+    const wineIds = new Set<string>();
+    db.wines.forEach((wine, index) => {
+      if (wineIds.has(wine.id)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['wines', index, 'id'],
+          message: `중복된 wine id: ${wine.id}`,
+        });
+      }
+      wineIds.add(wine.id);
+    });
 
+    const locationIds = new Set<string>();
+    db.locations.forEach((loc, index) => {
+      if (locationIds.has(loc.id)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['locations', index, 'id'],
+          message: `중복된 location id: ${loc.id}`,
+        });
+      }
+      locationIds.add(loc.id);
+    });
+
+    const bottleIds = new Set<string>();
     db.bottles.forEach((bottle, index) => {
+      if (bottleIds.has(bottle.id)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['bottles', index, 'id'],
+          message: `중복된 bottle id: ${bottle.id}`,
+        });
+      }
+      bottleIds.add(bottle.id);
+
       if (!wineIds.has(bottle.wineId)) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
@@ -114,14 +157,32 @@ export const wineDatabaseSchema = z
       }
     });
 
+    const tastingIds = new Set<string>();
+    const tastingBottleIds = new Set<string>();
     db.tastings.forEach((tasting, index) => {
+      if (tastingIds.has(tasting.id)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['tastings', index, 'id'],
+          message: `중복된 tasting id: ${tasting.id}`,
+        });
+      }
+      tastingIds.add(tasting.id);
+
       if (!bottleIds.has(tasting.bottleId)) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
           path: ['tastings', index, 'bottleId'],
           message: `존재하지 않는 bottleId 참조: ${tasting.bottleId}`,
         });
+      } else if (tastingBottleIds.has(tasting.bottleId)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['tastings', index, 'bottleId'],
+          message: `중복된 시음 기록 bottleId 참조: ${tasting.bottleId}`,
+        });
       }
+      tastingBottleIds.add(tasting.bottleId);
     });
   });
 

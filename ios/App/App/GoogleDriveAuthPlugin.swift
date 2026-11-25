@@ -20,9 +20,21 @@ public class GoogleDriveAuthPlugin: CAPPlugin, CAPBridgedPlugin {
             return false
         }
         let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-        return !trimmed.isEmpty
-            && !trimmed.contains("YOUR_IOS_CLIENT_ID")
-            && !trimmed.hasPrefix("$(")
+        guard !trimmed.isEmpty,
+              !trimmed.contains("YOUR_IOS_CLIENT_ID"),
+              !trimmed.hasPrefix("$("),
+              trimmed.hasSuffix(".apps.googleusercontent.com") else {
+            return false
+        }
+        let suffix = ".apps.googleusercontent.com"
+        let prefix = String(trimmed.dropLast(suffix.count))
+        guard !prefix.isEmpty else { return false }
+        let expectedScheme = "com.googleusercontent.apps.\(prefix)"
+        guard let urlTypes = Bundle.main.object(forInfoDictionaryKey: "CFBundleURLTypes") as? [[String: Any]] else {
+            return false
+        }
+        let registeredSchemes = urlTypes.flatMap { ($0["CFBundleURLSchemes"] as? [String]) ?? [] }
+        return registeredSchemes.contains(expectedScheme)
     }
 
     private func hasDriveScope(_ user: GIDGoogleUser) -> Bool {
@@ -80,6 +92,7 @@ public class GoogleDriveAuthPlugin: CAPPlugin, CAPBridgedPlugin {
                 }
 
                 guard self.hasDriveScope(user) else {
+                    GIDSignIn.sharedInstance.signOut()
                     call.reject("SCOPE_DENIED: Google Drive 파일 접근 권한이 허용되지 않았습니다.", "SCOPE_DENIED")
                     return
                 }
@@ -95,71 +108,85 @@ public class GoogleDriveAuthPlugin: CAPPlugin, CAPBridgedPlugin {
             return
         }
 
-        GIDSignIn.sharedInstance.restorePreviousSignIn { user, error in
-            if error != nil {
-                call.resolve(["signedIn": false])
-                return
-            }
-
-            guard let user = user, self.hasDriveScope(user) else {
-                call.resolve(["signedIn": false])
-                return
-            }
-
-            user.refreshTokensIfNeeded { refreshedUser, refreshError in
-                if refreshError != nil {
+        DispatchQueue.main.async {
+            GIDSignIn.sharedInstance.restorePreviousSignIn { user, error in
+                if error != nil {
                     call.resolve(["signedIn": false])
                     return
                 }
-                guard let validUser = refreshedUser else {
+
+                guard let user = user, self.hasDriveScope(user) else {
                     call.resolve(["signedIn": false])
                     return
                 }
-                call.resolve(self.sessionPayload(for: validUser))
+
+                user.refreshTokensIfNeeded { refreshedUser, refreshError in
+                    if refreshError != nil {
+                        call.resolve(["signedIn": false])
+                        return
+                    }
+                    guard let validUser = refreshedUser else {
+                        call.resolve(["signedIn": false])
+                        return
+                    }
+                    call.resolve(self.sessionPayload(for: validUser))
+                }
             }
         }
     }
 
     @objc func getAccessToken(_ call: CAPPluginCall) {
-        let refreshUser: (GIDGoogleUser) -> Void = { user in
-            guard self.hasDriveScope(user) else {
-                call.reject("SCOPE_DENIED: Google Drive 권한이 필요합니다.", "SCOPE_DENIED")
+        guard isClientIdConfigured() else {
+            call.reject(
+                "iOS Google Client ID(GIDClientID) 또는 URL Scheme 설정이 올바르지 않습니다.",
+                "CONFIG_MISSING"
+            )
+            return
+        }
+
+        DispatchQueue.main.async {
+            let refreshUser: (GIDGoogleUser) -> Void = { user in
+                guard self.hasDriveScope(user) else {
+                    call.reject("SCOPE_DENIED: Google Drive 권한이 필요합니다.", "SCOPE_DENIED")
+                    return
+                }
+
+                user.refreshTokensIfNeeded { refreshedUser, error in
+                    if let error = error {
+                        call.reject("SESSION_EXPIRED: \(error.localizedDescription)", "SESSION_EXPIRED")
+                        return
+                    }
+                    guard let validUser = refreshedUser else {
+                        call.reject("SESSION_EXPIRED: 토큰을 갱신할 수 없습니다.", "SESSION_EXPIRED")
+                        return
+                    }
+                    call.resolve(self.sessionPayload(for: validUser))
+                }
+            }
+
+            if let currentUser = GIDSignIn.sharedInstance.currentUser {
+                refreshUser(currentUser)
                 return
             }
 
-            user.refreshTokensIfNeeded { refreshedUser, error in
+            GIDSignIn.sharedInstance.restorePreviousSignIn { user, error in
                 if let error = error {
                     call.reject("SESSION_EXPIRED: \(error.localizedDescription)", "SESSION_EXPIRED")
                     return
                 }
-                guard let validUser = refreshedUser else {
-                    call.reject("SESSION_EXPIRED: 토큰을 갱신할 수 없습니다.", "SESSION_EXPIRED")
+                guard let restoredUser = user else {
+                    call.reject("SESSION_EXPIRED: 저장된 Google 로그인 세션이 없습니다.", "SESSION_EXPIRED")
                     return
                 }
-                call.resolve(self.sessionPayload(for: validUser))
+                refreshUser(restoredUser)
             }
-        }
-
-        if let currentUser = GIDSignIn.sharedInstance.currentUser {
-            refreshUser(currentUser)
-            return
-        }
-
-        GIDSignIn.sharedInstance.restorePreviousSignIn { user, error in
-            if let error = error {
-                call.reject("SESSION_EXPIRED: \(error.localizedDescription)", "SESSION_EXPIRED")
-                return
-            }
-            guard let restoredUser = user else {
-                call.reject("SESSION_EXPIRED: 저장된 Google 로그인 세션이 없습니다.", "SESSION_EXPIRED")
-                return
-            }
-            refreshUser(restoredUser)
         }
     }
 
     @objc func signOut(_ call: CAPPluginCall) {
-        GIDSignIn.sharedInstance.signOut()
-        call.resolve()
+        DispatchQueue.main.async {
+            GIDSignIn.sharedInstance.signOut()
+            call.resolve()
+        }
     }
 }

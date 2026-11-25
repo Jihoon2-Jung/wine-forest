@@ -1,5 +1,5 @@
-import { AlertCircle, ArrowUp, SlidersHorizontal } from 'lucide-react';
-import { useMemo, useState } from 'react';
+import { AlertCircle, ArrowUp, Plus, SlidersHorizontal } from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
 import { type CellarLocation, type WineColor } from '@/types/schema';
 import { useWineStore } from '@/store/useWineStore';
 import { ShelfCard } from '@/components/cellar/ShelfCard';
@@ -64,7 +64,7 @@ interface CabinetGroup {
 export function CellarMapPage() {
   const db = useWineStore((s) => s.db);
   const [selectedZone, setSelectedZone] = useState<string>('ALL');
-  const [selectedShelf, setSelectedShelf] = useState<CellarLocation | null>(null);
+  const [selectedShelfId, setSelectedShelfId] = useState<string | null>(null);
   const [showUnassigned, setShowUnassigned] = useState(false);
   const [configOpen, setConfigOpen] = useState(false);
 
@@ -155,6 +155,17 @@ export function CellarMapPage() {
     };
   }, [db]);
 
+  useEffect(() => {
+    if (selectedZone !== 'ALL' && !cabinets.some((c) => c.zone === selectedZone)) {
+      setSelectedZone('ALL');
+    }
+  }, [cabinets, selectedZone]);
+
+  const selectedShelf = useMemo(
+    () => (db && selectedShelfId ? db.locations.find((l) => l.id === selectedShelfId) ?? null : null),
+    [db, selectedShelfId],
+  );
+
   if (!db) return null;
 
   const visibleCabinets =
@@ -220,10 +231,10 @@ export function CellarMapPage() {
         <button
           type="button"
           onClick={() => setShowUnassigned(true)}
-          className="flex w-full items-center justify-between rounded-2xl border border-[var(--status-warn)]/40 bg-[var(--status-warn)]/10 px-4 py-3 text-left text-xs transition-colors hover:bg-[var(--status-warn)]/15"
+          className="flex w-full items-center justify-between rounded-2xl border border-status-warn/40 bg-status-warn/10 px-4 py-3 text-left text-xs transition-colors hover:bg-status-warn/15"
         >
           <span className="flex items-center gap-2 font-bold text-primary">
-            <AlertCircle className="h-4 w-4 text-[var(--status-warn)]" />
+            <AlertCircle className="h-4 w-4 text-status-warn" />
             보관 위치가 미지정된 와인이 {unassignedCount}병 있습니다
           </span>
           <span className="font-bold text-forest">정리하기 →</span>
@@ -231,93 +242,110 @@ export function CellarMapPage() {
       )}
 
       {/* 물리적 셀러 캐비닛 수직 적층 뷰 (삼성 → LG → 냉장고 신선 → 거실) */}
-      <div
-        className={
-          selectedZone === 'ALL'
-            ? 'grid grid-cols-1 items-start gap-5 lg:grid-cols-2 xl:grid-cols-3'
-            : 'mx-auto max-w-2xl'
-        }
-      >
-        {visibleCabinets.map((cab) => {
-          const cabRemain = cab.capacityCount - cab.usedCount;
-          const isSingleShelf = cab.shelvesTopDown.length <= 1;
+      {visibleCabinets.length === 0 ? (
+        <div className="flex flex-col items-center justify-center rounded-3xl border border-dashed border-subtle bg-surface/60 px-6 py-16 text-center">
+          <p className="text-sm font-bold text-primary">등록된 셀러·선반이 없습니다</p>
+          <p className="mt-1 text-xs text-secondary">
+            선반 관리에서 와인 셀러나 보관 공간을 추가해 배치도를 구성해 보세요.
+          </p>
+          <button
+            type="button"
+            onClick={() => setConfigOpen(true)}
+            className="mt-4 inline-flex items-center gap-1.5 rounded-xl bg-forest px-4 py-2 text-xs font-bold text-white hover:bg-forest-hover"
+          >
+            <Plus className="h-4 w-4" />
+            <span>선반 추가하기</span>
+          </button>
+        </div>
+      ) : (
+        <div
+          className={
+            selectedZone === 'ALL'
+              ? 'grid grid-cols-1 items-start gap-5 lg:grid-cols-2 xl:grid-cols-3'
+              : 'mx-auto max-w-2xl'
+          }
+        >
+          {visibleCabinets.map((cab) => {
+            const cabRemain = cab.capacityCount - cab.usedCount;
+            const isSingleShelf = cab.shelvesTopDown.length <= 1;
 
-          return (
-            <section
-              key={cab.zone}
-              className="overflow-hidden rounded-3xl border-2 border-subtle bg-elevated/55 shadow-card"
-            >
-              {/* 캐비닛 상단 헤더 */}
-              <div className="flex items-center justify-between border-b border-subtle bg-surface px-4 py-3">
-                <div>
-                  <h3 className="text-sm font-extrabold text-primary">{cab.zone}</h3>
-                  <p className="text-[11px] text-secondary tabular-nums">
-                    보유 <strong className="text-forest">{cab.usedCount}</strong> / {cab.capacityCount}병
-                    {cabRemain < 0
-                      ? ` (초과 ${cabRemain})`
-                      : ` (여유 +${cabRemain})`}
-                  </p>
+            return (
+              <section
+                key={cab.zone}
+                className="overflow-hidden rounded-3xl border-2 border-subtle bg-elevated/55 shadow-card"
+              >
+                {/* 캐비닛 상단 헤더 */}
+                <div className="flex items-center justify-between border-b border-subtle bg-surface px-4 py-3">
+                  <div>
+                    <h3 className="text-sm font-extrabold text-primary">{cab.zone}</h3>
+                    <p className="text-[11px] text-secondary tabular-nums">
+                      보유 <strong className="text-forest">{cab.usedCount}</strong> / {cab.capacityCount}병
+                      {cabRemain < 0
+                        ? ` (초과 +${Math.abs(cabRemain)})`
+                        : ` (여유 +${cabRemain})`}
+                    </p>
+                  </div>
+
+                  {!isSingleShelf && (
+                    <span className="inline-flex items-center gap-1 rounded-full bg-elevated px-2.5 py-1 text-[10px] font-semibold text-secondary">
+                      <ArrowUp className="h-3 w-3 text-forest" />
+                      아래 1-1 → 위
+                    </span>
+                  )}
                 </div>
 
+                {/* 선반 수직 적층 (맨 위 = 최고층, 맨 아래 = 1-1) */}
+                <div className="space-y-1.5 p-3">
+                  {cab.shelvesTopDown.map((shelfStat, idx) => {
+                    const currentTier = parseShelfNumbers(shelfStat.location.shelf)?.[0];
+                    const prevTier =
+                      idx > 0
+                        ? parseShelfNumbers(cab.shelvesTopDown[idx - 1].location.shelf)?.[0]
+                        : undefined;
+                    const showTierHeader =
+                      cab.hasMultiTiers && currentTier !== undefined && currentTier !== prevTier;
+
+                    return (
+                      <div key={shelfStat.location.id} className="space-y-1.5">
+                        {showTierHeader && (
+                          <div className="flex items-center gap-2 px-1 pt-1.5 pb-0.5">
+                            <span className="text-[10px] font-extrabold tracking-wider text-forest">
+                              {currentTier}단 ({currentTier}-x)
+                            </span>
+                            <div className="h-px flex-1 bg-subtle" />
+                          </div>
+                        )}
+                        <ShelfCard
+                          location={shelfStat.location}
+                          colorCounts={shelfStat.colorCounts}
+                          totalCount={shelfStat.totalCount}
+                          compactRack={!isSingleShelf}
+                          onSelect={(loc) => setSelectedShelfId(loc.id)}
+                        />
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {/* 캐비닛 바닥 바 표시 */}
                 {!isSingleShelf && (
-                  <span className="inline-flex items-center gap-1 rounded-full bg-elevated px-2.5 py-1 text-[10px] font-semibold text-secondary">
-                    <ArrowUp className="h-3 w-3 text-forest" />
-                    아래 1-1 → 위
-                  </span>
+                  <div className="flex items-center justify-between border-t border-subtle bg-surface/70 px-4 py-1.5 text-[10px] font-semibold text-secondary">
+                    <span>▲ 상단 선반</span>
+                    <span>▼ 바닥 (1-1 시작)</span>
+                  </div>
                 )}
-              </div>
-
-              {/* 선반 수직 적층 (맨 위 = 최고층, 맨 아래 = 1-1) */}
-              <div className="space-y-1.5 p-3">
-                {cab.shelvesTopDown.map((shelfStat, idx) => {
-                  const currentTier = parseShelfNumbers(shelfStat.location.shelf)?.[0];
-                  const prevTier =
-                    idx > 0
-                      ? parseShelfNumbers(cab.shelvesTopDown[idx - 1].location.shelf)?.[0]
-                      : undefined;
-                  const showTierHeader =
-                    cab.hasMultiTiers && currentTier !== undefined && currentTier !== prevTier;
-
-                  return (
-                    <div key={shelfStat.location.id} className="space-y-1.5">
-                      {showTierHeader && (
-                        <div className="flex items-center gap-2 px-1 pt-1.5 pb-0.5">
-                          <span className="text-[10px] font-extrabold tracking-wider text-forest">
-                            {currentTier}단 ({currentTier}-x)
-                          </span>
-                          <div className="h-px flex-1 bg-subtle" />
-                        </div>
-                      )}
-                      <ShelfCard
-                        location={shelfStat.location}
-                        colorCounts={shelfStat.colorCounts}
-                        totalCount={shelfStat.totalCount}
-                        compactRack={!isSingleShelf}
-                        onSelect={setSelectedShelf}
-                      />
-                    </div>
-                  );
-                })}
-              </div>
-
-              {/* 캐비닛 바닥 바 표시 */}
-              {!isSingleShelf && (
-                <div className="flex items-center justify-between border-t border-subtle bg-surface/70 px-4 py-1.5 text-[10px] font-semibold text-secondary">
-                  <span>▲ 상단 선반</span>
-                  <span>▼ 바닥 (1-1 시작)</span>
-                </div>
-              )}
-            </section>
-          );
-        })}
-      </div>
+              </section>
+            );
+          })}
+        </div>
+      )}
 
       {/* 선반 상세 드로어 */}
       <ShelfDetailDrawer
         location={selectedShelf}
         unassignedMode={showUnassigned}
         onClose={() => {
-          setSelectedShelf(null);
+          setSelectedShelfId(null);
           setShowUnassigned(false);
         }}
       />

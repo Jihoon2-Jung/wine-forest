@@ -19,6 +19,15 @@ export interface SyncSaveResult {
   modifiedTime: string;
   savedData: WineDatabase;
   autoBackupCreated: BackupSnapshot | null;
+  conflictBackupCreated?: boolean;
+}
+
+export interface SavePolicyParams {
+  fileId: string | null;
+  data: WineDatabase;
+  expectedModifiedTime: string | null;
+  forceOverwrite?: boolean;
+  now?: Date;
 }
 
 /**
@@ -30,7 +39,7 @@ export interface SyncSaveResult {
 export class SyncEngine {
   private writeChain: Promise<unknown> = Promise.resolve();
 
-  private enqueue<T>(task: () => Promise<T>): Promise<T> {
+  enqueue<T>(task: () => Promise<T>): Promise<T> {
     const next = this.writeChain.then(task, task);
     this.writeChain = next.catch(() => undefined);
     return next;
@@ -38,24 +47,27 @@ export class SyncEngine {
 
   saveWithPolicy(
     adapter: StorageAdapter,
-    params: {
-      fileId: string | null;
-      data: WineDatabase;
-      expectedModifiedTime: string | null;
-      forceOverwrite?: boolean;
-      now?: Date;
-    },
+    paramsOrProvider: SavePolicyParams | (() => SavePolicyParams | null),
   ): Promise<SyncSaveResult> {
     return this.enqueue(async () => {
+      const params =
+        typeof paramsOrProvider === 'function' ? paramsOrProvider() : paramsOrProvider;
+      if (!params) {
+        throw new Error('저장할 최신 셀러 데이터가 없습니다.');
+      }
+
       const now = params.now ?? new Date();
       const nowIso = now.toISOString();
 
       // 1. 강제 덮어쓰기 시 원격 파일을 충돌 백업 폴더에 먼저 대피
+      let conflictBackupCreated: boolean | undefined;
       if (params.forceOverwrite && params.fileId) {
+        conflictBackupCreated = false;
         try {
           const remote = await adapter.loadDb(params.fileId);
           const conflictName = `wine_db_conflict_${formatBackupDateTimeStamp(now)}.json`;
           await adapter.createBackup(remote.data, conflictName);
+          conflictBackupCreated = true;
         } catch (err) {
           console.warn('[SyncEngine] 강제 덮어쓰기 전 원격 대피 백업 실패:', err);
         }
@@ -107,12 +119,13 @@ export class SyncEngine {
         modifiedTime: saved.modifiedTime,
         savedData: payloadToSave,
         autoBackupCreated,
+        conflictBackupCreated,
       };
     });
   }
 
   /**
-   * M3 보강: 과거 백업 스냅샷 복원 직전에 현재 DB를 pre_restore 백업으로 대피 저장
+   * M3 보강: 과거 백업 스냅샷 복원 직전에 복원본 검증 + 원격 최신본(또는 현재 로컬본)을 pre_restore 백업으로 대피 저장
    */
   restoreBackupSafely(
     adapter: StorageAdapter,
@@ -120,17 +133,33 @@ export class SyncEngine {
       currentData: WineDatabase | null;
       backupFileId: string;
       fileId: string | null;
+      expectedModifiedTime?: string | null;
       now?: Date;
     },
   ): Promise<SyncSaveResult> {
     return this.enqueue(async () => {
       const now = params.now ?? new Date();
-      if (params.currentData) {
+      // 1) 먼저 복원할 스냅샷을 로드·검증(유효하지 않은 백업이면 불필요한 pre_restore 백업을 만들지 않음)
+      const restoredRaw = await adapter.loadBackup(params.backupFileId);
+
+      // 2) 원격에 더 최신 변경이 있다면 원격본을 우선 대피 백업하고, 실패/미존재 시 로컬 currentData 대피
+      let snapshotToBackup: WineDatabase | null = params.currentData;
+      if (params.fileId) {
+        try {
+          const remoteMod = await adapter.getFileModifiedTime(params.fileId);
+          if (remoteMod && (!params.expectedModifiedTime || remoteMod !== params.expectedModifiedTime)) {
+            const remote = await adapter.loadDb(params.fileId);
+            snapshotToBackup = remote.data;
+          }
+        } catch {
+          // 원격 조회 실패 시 로컬 currentData 대피로 폴백
+        }
+      }
+      if (snapshotToBackup) {
         const preRestoreName = `wine_db_pre_restore_${formatBackupDateTimeStamp(now)}.json`;
-        await adapter.createBackup(params.currentData, preRestoreName);
+        await adapter.createBackup(snapshotToBackup, preRestoreName);
       }
 
-      const restoredRaw = await adapter.loadBackup(params.backupFileId);
       const restored: WineDatabase = {
         ...restoredRaw,
         metadata: {

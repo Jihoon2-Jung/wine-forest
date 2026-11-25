@@ -57,4 +57,14 @@ export class AuthRequiredError extends Error {
   }
 }
 
+export class FileNotFoundError extends Error {
+  readonly fileId: string;
+
+  constructor(fileId: string, message = 'Google Drive에서 대상 DB 파일을 찾을 수 없거나 휴지통에 있습니다.') {
+    super(message);
+    this.name = 'FileNotFoundError';
+    this.fileId = fileId;
+  }
+}
+
 export type StorageMode = 'google_drive' | 'local_test';

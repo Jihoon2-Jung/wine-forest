@@ -61,15 +61,40 @@ function getDb(): Promise<IDBPDatabase<WineForestIdbSchema>> {
           db.createObjectStore('photoCache', { keyPath: 'fileId' });
         }
       },
+      blocking(_currentVersion, _blockedVersion, _event) {
+        void dbPromise?.then((d) => d.close()).catch(() => undefined);
+        dbPromise = null;
+      },
+      terminated() {
+        // iOS WKWebView / Safari 백그라운드 유휴 연결 종료 시 다음 호출에서 자동 재오픈
+        dbPromise = null;
+      },
+    }).catch((err) => {
+      dbPromise = null;
+      throw err;
     });
   }
   return dbPromise;
 }
 
-export async function loadCachedState(): Promise<CachedAppState | null> {
+async function withDbRetry<T>(op: (db: IDBPDatabase<WineForestIdbSchema>) => Promise<T>): Promise<T> {
   try {
     const db = await getDb();
-    const record = await db.get('appState', 'singleton');
+    return await op(db);
+  } catch (err) {
+    const name = err instanceof Error ? err.name : '';
+    if (name === 'InvalidStateError' || name === 'TransactionInactiveError') {
+      dbPromise = null;
+      const db = await getDb();
+      return await op(db);
+    }
+    throw err;
+  }
+}
+
+export async function loadCachedState(): Promise<CachedAppState | null> {
+  try {
+    const record = await withDbRetry((db) => db.get('appState', 'singleton'));
     return record ?? null;
   } catch {
     return null;
@@ -79,27 +104,25 @@ export async function loadCachedState(): Promise<CachedAppState | null> {
 export async function saveCachedState(
   state: Omit<CachedAppState, 'id' | 'updatedAt'>,
 ): Promise<void> {
-  const db = await getDb();
-  await db.put('appState', {
-    ...state,
-    id: 'singleton',
-    updatedAt: new Date().toISOString(),
-  });
+  await withDbRetry((db) =>
+    db.put('appState', {
+      ...state,
+      id: 'singleton',
+      updatedAt: new Date().toISOString(),
+    }),
+  );
 }
 
 export async function clearCachedState(): Promise<void> {
-  const db = await getDb();
-  await db.delete('appState', 'singleton');
+  await withDbRetry((db) => db.delete('appState', 'singleton'));
 }
 
 export async function saveLocalBackup(record: LocalBackupRecord): Promise<void> {
-  const db = await getDb();
-  await db.put('localBackups', record);
+  await withDbRetry((db) => db.put('localBackups', record));
 }
 
 export async function listLocalBackups(): Promise<BackupSnapshot[]> {
-  const db = await getDb();
-  const records = await db.getAll('localBackups');
+  const records = await withDbRetry((db) => db.getAll('localBackups'));
   return records
     .sort((a, b) => b.createdTime.localeCompare(a.createdTime))
     .map(({ fileId, name, createdTime, sizeBytes }) => ({
@@ -111,15 +134,21 @@ export async function listLocalBackups(): Promise<BackupSnapshot[]> {
 }
 
 export async function loadLocalBackup(fileId: string): Promise<WineDatabase | null> {
-  const db = await getDb();
-  const record = await db.get('localBackups', fileId);
+  const record = await withDbRetry((db) => db.get('localBackups', fileId));
   return record?.data ?? null;
+}
+
+export async function clearAllLocalBackups(): Promise<void> {
+  try {
+    await withDbRetry((db) => db.clear('localBackups'));
+  } catch {
+    // ignore backup clear errors
+  }
 }
 
 export async function getCachedPhoto(fileId: string): Promise<Blob | null> {
   try {
-    const db = await getDb();
-    const record = await db.get('photoCache', fileId);
+    const record = await withDbRetry((db) => db.get('photoCache', fileId));
     return record?.blob ?? null;
   } catch {
     return null;
@@ -128,13 +157,14 @@ export async function getCachedPhoto(fileId: string): Promise<Blob | null> {
 
 export async function putCachedPhoto(fileId: string, blob: Blob): Promise<void> {
   try {
-    const db = await getDb();
-    await db.put('photoCache', {
-      fileId,
-      blob,
-      mimeType: blob.type || 'image/webp',
-      cachedAt: new Date().toISOString(),
-    });
+    await withDbRetry((db) =>
+      db.put('photoCache', {
+        fileId,
+        blob,
+        mimeType: blob.type || 'image/webp',
+        cachedAt: new Date().toISOString(),
+      }),
+    );
   } catch {
     // ignore storage quota errors
   }
@@ -142,8 +172,7 @@ export async function putCachedPhoto(fileId: string, blob: Blob): Promise<void> 
 
 export async function deleteCachedPhoto(fileId: string): Promise<void> {
   try {
-    const db = await getDb();
-    await db.delete('photoCache', fileId);
+    await withDbRetry((db) => db.delete('photoCache', fileId));
   } catch {
     // ignore cache deletion errors
   }
@@ -151,8 +180,7 @@ export async function deleteCachedPhoto(fileId: string): Promise<void> {
 
 export async function clearAllCachedPhotos(): Promise<void> {
   try {
-    const db = await getDb();
-    await db.clear('photoCache');
+    await withDbRetry((db) => db.clear('photoCache'));
   } catch {
     // ignore cache clear errors
   }

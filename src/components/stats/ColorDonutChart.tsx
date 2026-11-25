@@ -58,6 +58,8 @@ export function ColorDonutChart({ data, onSelectColor }: ColorDonutChartProps) {
                     fontSize: '12px',
                     color: 'var(--text-primary)',
                   }}
+                  itemStyle={{ color: 'var(--text-primary)' }}
+                  labelStyle={{ color: 'var(--text-primary)' }}
                 />
               </PieChart>
             </ResponsiveContainer>

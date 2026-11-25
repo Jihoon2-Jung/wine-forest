@@ -1,7 +1,7 @@
 # JH Wine Forest — 모바일 앱(iOS / Android) 전환 마스터 구현 계획 (Mobile v1.0)
 
 > **연관 문서 (모바일 시리즈):**
-> - **상태:** **M1~M4 코드/CI 준비 완료 (Mac·iOS 범위) — `GoogleSignIn-iOS` SPM 연결 · 공용 `App.xcscheme` · GitHub Actions(`xcode-27`) `.ipa` 빌드 워크플로 구성 완료 (Android 코드 미구현 · Windows PC 별도 진행, Google Cloud/Secrets 등록 후 M5 실기기 설치 진행)**
+> - **상태:** **M1~M4 완료 + M5 iOS 실기기 테스트 및 전수 감사 안정화 패치 완료 (2026-11-26: Part A 46건 전량 수정 · `8개 스위트 / 55개 테스트` 통과 · `.ipa` 재빌드 후 최종 실기기 확인 대기 / Android는 Windows PC 별도 진행)**
 > - **마스터 구현 계획:** `MOBILE_IMPLEMENTATION_PLAN.md` (본 문서)
 > - **Mac · iOS(+공통 코드 & Android 선행) 개발 작업지시서:** [SPEC_MOBILE_IOS.md](./SPEC_MOBILE_IOS.md)
 > - **Windows · Android 빌드/배포 실전 가이드:** [GUIDE_WIN_ANDROID.md](./GUIDE_WIN_ANDROID.md)
@@ -25,7 +25,7 @@
 | **OAuth 동의 화면 상태** | **프로덕션(Production) 게시 전환** | Refresh Token 7일 만료 제한 해제 → **사실상 영구 자동 로그인** (`drive.file`은 비민감 스코프) |
 | **iOS 의존성 및 서명** | **SPM (`CapApp-SPM` + `GoogleSignIn-iOS`) + GitHub Actions(`xcode-27`) 미서명 `.ipa` → Sideloadly/SideStore 무료 서명** | Intel Mac(Xcode 27 미지원) + iOS 27 조합 대응, Mac 디스크 0GB 사용 (추후 연 \$99 TestFlight 전환 가능) |
 | **1차 포함 모바일 UX** | ① JSON 내보내기 네이티브 공유 시트<br>② OS 상태바 라이트/다크 자동 연동<br>③ Android 뒤로가기(모달/라우트) 처리 | 햅틱 진동(`@capacitor/haptics`)·CI Android APK 자동 빌드는 1차 범위 제외 |
-| **현재 작업 순서** | **M1~M4 Mac·iOS 코드 & CI 워크플로 준비 완료 (`android/` 미구현)** | Google Cloud iOS OAuth + GitHub Secret(`GOOGLE_IOS_CLIENT_ID`) 등록 → Actions `.ipa` 빌드 → Sideloadly/SideStore로 iOS 27 실기기 검증(M5) |
+| **현재 작업 순서** | **M1~M4 완료 · M5 iOS 전수 감사 안정화 패치 완료 (`android/` 미구현)** | 카메라 `Info.plist`·Tailwind RGB 투명도·Safe-Area·StatusBar·Swift 스레드 안전성·WKWebView `ConfirmDialog` 전량 반영 완료 → `.ipa` 재빌드 및 실기기 확인 진행 |
 
 ---
 
@@ -135,8 +135,18 @@ flowchart TD
 
 ## 6. 기존 웹앱(GitHub Pages PWA) 100% 하위 호환성 체크리스트
 
-- [ ] `npm run build` 실행 시 `dist/index.html`의 에셋 경로가 `/wine-forest/`로 유지되고 `dist/sw.js`, `dist/manifest.webmanifest`가 정상 생성되는가?
-- [ ] `BUILD_TARGET=capacitor` 미지정 상태에서 `Capacitor.isNativePlatform()`이 `false`로 평가되어 웹 브라우저가 항상 `WebGisAuthAdapter`를 타는가?
-- [ ] 웹 환경에서 `nativeBridge.ts`의 StatusBar / App / Filesystem / Share 호출이 동적/안전 가드로 스킵되거나 기존 Blob 다운로드로 폴백되는가?
-- [ ] 기존 테스트 스위트(`privacyMode.test.tsx`, `schemaValidation.test.ts`, `statsCalculator.test.ts`, `syncConflict.test.ts`, `wineStore.test.ts`, `phase2.test.tsx` — 총 6개 스위트 / 28개 테스트)가 단 1건의 회귀 없이 모두 통과하는가?
-- [ ] `.github/workflows/deploy.yml`의 `npm run typecheck && npm run test && npm run build` CI 파이프라인이 추가 환경변수나 네이티브 도구 없이 그대로 통과하는가?
+- [x] `npm run build` 실행 시 `dist/index.html`의 에셋 경로가 `/wine-forest/`로 유지되고 `dist/sw.js`, `dist/manifest.webmanifest`가 정상 생성되는가?
+- [x] `BUILD_TARGET=capacitor` 미지정 상태에서 `Capacitor.isNativePlatform()`이 `false`로 평가되어 웹 브라우저가 항상 `WebGisAuthAdapter`를 타는가?
+- [x] 웹 환경에서 `nativeBridge.ts`의 StatusBar / App / Filesystem / Share 호출이 동적/안전 가드로 스킵되거나 기존 Blob 다운로드로 폴백되는가?
+- [x] 기존 테스트 스위트 + 모바일 어댑터 및 전수 감사 회귀 테스트(`privacyMode`, `schemaValidation`, `statsCalculator`, `syncConflict`, `wineStore`, `phase2`, `authAdapter`, `auditFixes` — 총 **8개 스위트 / 55개 테스트**)가 단 1건의 회귀 없이 모두 통과하는가?
+- [x] `.github/workflows/deploy.yml`의 `npm run typecheck && npm run test && npm run build` CI 파이프라인이 추가 환경변수나 네이티브 도구 없이 그대로 통과하는가?
+
+---
+
+## 7. M5 실기기 검증 & 전수 감사 패치 완료 이력 (2026-11-26)
+
+- **반영 완료 ✅ (전 항목 수정·검증 완료):**
+  1. **라벨 썸네일 가로 깨짐 수정:** `WineThumbnail` `w-[52px] h-[74px]` 고정 + `WineGroupCard` `overflow-hidden` + `index.css` `overflow-x: clip`.
+  2. **카메라 권한 키 3종 완비 & 에러 노출:** `ios/App/App/Info.plist`에 `NSPhotoLibraryAddUsageDescription` 추가 + `photoPicker.ts` 한글 카메라 라벨(`promptLabel*`) 및 비취소 오류 토스트 노출.
+  3. **UI 투명도 & Safe-Area & 모달 스택:** `tokens.css`/`tailwind.config.ts` RGB `<alpha-value>` 채널 + `status.*` 토큰 전환(152건 복구), `FabButton`/`ToastBar`/`AppShell`/`OnboardingView`/`PhotoLightbox`/`BottomSheet` Safe-Area 및 `lg:` 통일, 중첩 모달 스택(`registerModalLayer`) + 참조 카운트 스크롤 잠금.
+  4. **iOS 네이티브 브릿지·Swift·CI 안정화:** `capacitor.config.ts`·`ios/App/App/capacitor.config.json` `StatusBar.overlaysWebView: true`, `GoogleDriveAuthPlugin.swift` 메인 스레드 직렬화·`CFBundleURLSchemes` 사전 검증·`SCOPE_DENIED` `signOut()` 정리, `SceneDelegate.swift` 콜드스타트·다중 URL 전달, `nativeGoogleAuthAdapter.ts` 401 토큰 무효화·`forceRefresh`·`sessionGeneration`·오프라인 세션 보존, `nativeBridge.ts` `Share.share` 중복 `text` 제거, `ConfirmDialog.tsx` 신설로 전 화면 `window.confirm` 제거(WKWebView 크래시 방지), `Info.plist` 한국어 로컬라이제이션(`ko`/`en`), `vite.config.ts` Capacitor 빌드 Web GIS `<script>` 제거, `ios-ipa.yml` `bundle_id`·`REVERSED_ID` 검증 강화.

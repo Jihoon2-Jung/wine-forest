@@ -1,3 +1,4 @@
+import { EyeOff } from 'lucide-react';
 import { useState } from 'react';
 import {
   Bar,
@@ -88,52 +89,65 @@ export function TrendChart({ monthlyData, yearlyData }: TrendChartProps) {
         </div>
       </div>
 
-      <div className="h-64">
-        <ResponsiveContainer width="100%" height="100%">
-          <ComposedChart data={active.points} margin={{ top: 8, right: 12, left: 0, bottom: 4 }}>
-            <CartesianGrid strokeDasharray="3 3" stroke="var(--border-subtle)" vertical={false} />
-            <XAxis dataKey="label" tick={{ fill: 'var(--text-secondary)', fontSize: 11 }} />
-            <YAxis
-              allowDecimals={false}
-              tick={{ fill: 'var(--text-secondary)', fontSize: 11 }}
-              tickFormatter={(val: number) => {
-                if (metric === 'count') return `${val}`;
-                if (isPrivacyMode) return '••••';
-                return formatCompactKrw(val);
-              }}
-            />
-            <Tooltip
-              formatter={(value: number, name: string) => {
-                if (metric === 'count') return [`${value}병`, name];
-                return [isPrivacyMode ? '••••원' : formatKrw(value), name];
-              }}
-              contentStyle={{
-                backgroundColor: 'var(--bg-surface)',
-                borderColor: 'var(--border-subtle)',
-                borderRadius: '12px',
-                fontSize: '12px',
-                color: 'var(--text-primary)',
-              }}
-            />
-            <Legend wrapperStyle={{ fontSize: '12px' }} />
-            <Bar
-              dataKey={purchaseKey}
-              name="구매"
-              fill="var(--brand-forest)"
-              radius={[4, 4, 0, 0]}
-              barSize={20}
-            />
-            <Line
-              type="monotone"
-              dataKey={consumeKey}
-              name="소비"
-              stroke="var(--brand-burgundy)"
-              strokeWidth={2.5}
-              dot={{ r: 3.5, fill: 'var(--brand-burgundy)' }}
-            />
-          </ComposedChart>
-        </ResponsiveContainer>
-      </div>
+      {isPrivacyMode && metric === 'value' ? (
+        <div className="flex h-64 flex-col items-center justify-center gap-2 rounded-xl border border-dashed border-subtle bg-elevated/50 text-center">
+          <EyeOff className="h-6 w-6 text-burgundy" />
+          <p className="text-xs font-semibold text-primary">가격 숨김(프라이버시) 모드 활성 중</p>
+          <p className="text-[11px] text-secondary">
+            상단 눈 아이콘을 눌러 가격 표시를 켜거나 &apos;병수&apos; 탭을 선택하세요.
+          </p>
+        </div>
+      ) : active.points.length === 0 ? (
+        <div className="flex h-64 items-center justify-center text-xs text-secondary">
+          표시할 구매·소비 이력이 없습니다.
+        </div>
+      ) : (
+        <div className="h-64">
+          <ResponsiveContainer width="100%" height="100%">
+            <ComposedChart data={active.points} margin={{ top: 8, right: 12, left: 0, bottom: 4 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="var(--border-subtle)" vertical={false} />
+              <XAxis dataKey="label" tick={{ fill: 'var(--text-secondary)', fontSize: 11 }} />
+              <YAxis
+                allowDecimals={false}
+                tick={{ fill: 'var(--text-secondary)', fontSize: 11 }}
+                tickFormatter={(val: number) => {
+                  if (metric === 'count') return `${val}`;
+                  return formatCompactKrw(val);
+                }}
+              />
+              <Tooltip
+                formatter={(value: number, name: string) => {
+                  if (metric === 'count') return [`${value}병`, name];
+                  return [formatKrw(value), name];
+                }}
+                contentStyle={{
+                  backgroundColor: 'var(--bg-surface)',
+                  borderColor: 'var(--border-subtle)',
+                  borderRadius: '12px',
+                  fontSize: '12px',
+                  color: 'var(--text-primary)',
+                }}
+              />
+              <Legend wrapperStyle={{ fontSize: '12px' }} />
+              <Bar
+                dataKey={purchaseKey}
+                name="구매"
+                fill="var(--brand-forest)"
+                radius={[4, 4, 0, 0]}
+                barSize={20}
+              />
+              <Line
+                type="monotone"
+                dataKey={consumeKey}
+                name="소비"
+                stroke="var(--brand-burgundy)"
+                strokeWidth={2.5}
+                dot={{ r: 3.5, fill: 'var(--brand-burgundy)' }}
+              />
+            </ComposedChart>
+          </ResponsiveContainer>
+        </div>
+      )}
     </div>
   );
 }

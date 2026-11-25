@@ -1,5 +1,5 @@
 import { MapPin, Wine } from 'lucide-react';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import type { BottleInstance, CellarLocation, WineMaster } from '@/types/schema';
 import { formatWineOrigin } from '@/services/domain/wineHelpers';
 import { useWineStore } from '@/store/useWineStore';
@@ -45,6 +45,12 @@ export function ShelfDetailDrawer({
   }, [db, location, unassignedMode]);
 
   const open = Boolean(location || unassignedMode);
+
+  useEffect(() => {
+    setConsumeTarget(null);
+    setMoveTarget(null);
+  }, [open, location?.id, unassignedMode]);
+
   if (!open) return null;
 
   const title = unassignedMode ? '미지정 보관 와인' : location!.displayName;
@@ -87,7 +93,7 @@ export function ShelfDetailDrawer({
                   <button
                     type="button"
                     onClick={() => setConsumeTarget({ wine, bottle })}
-                    className="inline-flex items-center gap-1 rounded-lg bg-burgundy/12 px-2.5 py-1.5 text-xs font-bold text-burgundy hover:bg-burgundy hover:text-white"
+                    className="inline-flex items-center gap-1 rounded-lg bg-burgundy/[0.12] px-2.5 py-1.5 text-xs font-bold text-burgundy hover:bg-burgundy hover:text-white"
                   >
                     <Wine className="h-3.5 w-3.5" />
                     <span>소비</span>

@@ -1,5 +1,5 @@
 import { ArrowDown, ArrowUp, Check, Pencil, Plus, Trash2, X } from 'lucide-react';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import type { CellarLocation } from '@/types/schema';
 import { useWineStore } from '@/store/useWineStore';
 import { BottomSheet } from '@/components/common/BottomSheet';
@@ -13,6 +13,7 @@ export function ShelfConfigModal({ open, onClose }: ShelfConfigModalProps) {
   const db = useWineStore((s) => s.db);
   const addLocation = useWineStore((s) => s.addLocation);
   const updateLocation = useWineStore((s) => s.updateLocation);
+  const reorderLocations = useWineStore((s) => s.reorderLocations);
   const deleteLocation = useWineStore((s) => s.deleteLocation);
 
   const [zone, setZone] = useState('삼성');
@@ -24,6 +25,13 @@ export function ShelfConfigModal({ open, onClose }: ShelfConfigModalProps) {
   const [editShelf, setEditShelf] = useState('');
   const [editDisplayName, setEditDisplayName] = useState('');
   const [displayNameEdited, setDisplayNameEdited] = useState(false);
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    if (!open) {
+      setEditingId(null);
+    }
+  }, [open]);
 
   const { sortedLocations, inStockCountMap } = useMemo(() => {
     if (!db) return { sortedLocations: [], inStockCountMap: new Map<string, number>() };
@@ -43,28 +51,40 @@ export function ShelfConfigModal({ open, onClose }: ShelfConfigModalProps) {
 
   const handleAdd = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (busy) return;
     const z = zone.trim();
     const s = shelf.trim() || '기본';
     if (!z) return;
     const displayName = s === '기본' ? z : `${z} ${s}`;
     const maxOrder = sortedLocations.reduce((m, l) => Math.max(m, l.sortOrder), 0);
-    await addLocation({
-      zone: z,
-      shelf: s,
-      displayName,
-      maxCapacity: Math.max(0, Number(maxCapacity) || 0),
-      sortOrder: maxOrder + 1,
-    });
-    setShelf('');
+    setBusy(true);
+    try {
+      await addLocation({
+        zone: z,
+        shelf: s,
+        displayName,
+        maxCapacity: Math.max(0, Math.round(Number(maxCapacity) || 0)),
+        sortOrder: maxOrder + 1,
+      });
+      setShelf('');
+    } finally {
+      setBusy(false);
+    }
   };
 
   const handleMoveOrder = async (index: number, delta: -1 | 1) => {
+    if (busy) return;
     const targetIdx = index + delta;
     if (targetIdx < 0 || targetIdx >= sortedLocations.length) return;
-    const current = sortedLocations[index];
-    const swap = sortedLocations[targetIdx];
-    await updateLocation(current.id, { sortOrder: swap.sortOrder });
-    await updateLocation(swap.id, { sortOrder: current.sortOrder });
+    const orderedIds = sortedLocations.map((l) => l.id);
+    const [moved] = orderedIds.splice(index, 1);
+    orderedIds.splice(targetIdx, 0, moved);
+    setBusy(true);
+    try {
+      await reorderLocations(orderedIds);
+    } finally {
+      setBusy(false);
+    }
   };
 
   const startRename = (loc: CellarLocation) => {
@@ -76,16 +96,32 @@ export function ShelfConfigModal({ open, onClose }: ShelfConfigModalProps) {
   };
 
   const handleSaveRename = async (locId: string) => {
+    if (busy) return;
     const z = editZone.trim();
     const s = editShelf.trim() || '기본';
     if (!z) return;
     const display = editDisplayName.trim() || (s === '기본' ? z : `${z} ${s}`);
-    await updateLocation(locId, {
-      zone: z,
-      shelf: s,
-      displayName: display,
-    });
-    setEditingId(null);
+    setBusy(true);
+    try {
+      await updateLocation(locId, {
+        zone: z,
+        shelf: s,
+        displayName: display,
+      });
+      setEditingId(null);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleDelete = async (locId: string) => {
+    if (busy) return;
+    setBusy(true);
+    try {
+      await deleteLocation(locId);
+    } finally {
+      setBusy(false);
+    }
   };
 
   return (
@@ -119,6 +155,7 @@ export function ShelfConfigModal({ open, onClose }: ShelfConfigModalProps) {
           <input
             type="number"
             min={0}
+            step={1}
             value={maxCapacity}
             onChange={(e) => setMaxCapacity(e.target.value)}
             placeholder="정원"
@@ -126,7 +163,8 @@ export function ShelfConfigModal({ open, onClose }: ShelfConfigModalProps) {
           />
           <button
             type="submit"
-            className="inline-flex items-center justify-center gap-1 rounded-xl bg-forest px-3 py-2 text-xs font-bold text-white hover:bg-forest-hover sm:col-span-3"
+            disabled={busy}
+            className="inline-flex items-center justify-center gap-1 rounded-xl bg-forest px-3 py-2 text-xs font-bold text-white hover:bg-forest-hover disabled:opacity-50 sm:col-span-3"
           >
             <Plus className="h-3.5 w-3.5" />
             <span>선반 추가</span>
@@ -148,7 +186,7 @@ export function ShelfConfigModal({ open, onClose }: ShelfConfigModalProps) {
                     <div className="flex flex-col">
                       <button
                         type="button"
-                        disabled={idx === 0}
+                        disabled={busy || idx === 0}
                         onClick={() => void handleMoveOrder(idx, -1)}
                         className="text-secondary hover:text-primary disabled:opacity-30"
                         aria-label="위로 이동"
@@ -157,7 +195,7 @@ export function ShelfConfigModal({ open, onClose }: ShelfConfigModalProps) {
                       </button>
                       <button
                         type="button"
-                        disabled={idx === sortedLocations.length - 1}
+                        disabled={busy || idx === sortedLocations.length - 1}
                         onClick={() => void handleMoveOrder(idx, 1)}
                         className="text-secondary hover:text-primary disabled:opacity-30"
                         aria-label="아래로 이동"
@@ -177,11 +215,14 @@ export function ShelfConfigModal({ open, onClose }: ShelfConfigModalProps) {
                     <label className="flex items-center gap-1 text-[11px] text-secondary">
                       <span>정원</span>
                       <input
+                        key={`${loc.id}:${loc.maxCapacity}`}
                         type="number"
                         min={0}
+                        step={1}
                         defaultValue={loc.maxCapacity}
                         onBlur={(e) => {
-                          const val = Math.max(0, Number(e.target.value) || 0);
+                          const val = Math.max(0, Math.round(Number(e.target.value) || 0));
+                          e.target.value = String(val);
                           if (val !== loc.maxCapacity) {
                             void updateLocation(loc.id, { maxCapacity: val });
                           }
@@ -192,8 +233,9 @@ export function ShelfConfigModal({ open, onClose }: ShelfConfigModalProps) {
 
                     <button
                       type="button"
+                      disabled={busy}
                       onClick={() => (isEditing ? setEditingId(null) : startRename(loc))}
-                      className="rounded-lg border border-subtle p-1.5 text-secondary hover:border-forest hover:text-forest"
+                      className="rounded-lg border border-subtle p-1.5 text-secondary hover:border-forest hover:text-forest disabled:opacity-35"
                       title="선반 이름 수정"
                       aria-label="선반 이름 수정"
                     >
@@ -202,9 +244,9 @@ export function ShelfConfigModal({ open, onClose }: ShelfConfigModalProps) {
 
                     <button
                       type="button"
-                      onClick={() => void deleteLocation(loc.id)}
-                      disabled={count > 0}
-                      className="rounded-lg border border-subtle p-1.5 text-secondary hover:border-[var(--status-danger)] hover:text-[var(--status-danger)] disabled:cursor-not-allowed disabled:opacity-35"
+                      onClick={() => void handleDelete(loc.id)}
+                      disabled={busy || count > 0}
+                      className="rounded-lg border border-subtle p-1.5 text-secondary hover:border-status-danger hover:text-status-danger disabled:cursor-not-allowed disabled:opacity-35"
                       title={count > 0 ? '보유 병이 있어 삭제 불가' : '선반 삭제'}
                       aria-label="선반 삭제"
                     >

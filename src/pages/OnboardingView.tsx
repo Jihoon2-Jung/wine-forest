@@ -11,6 +11,7 @@ import {
 import { useRef, useState } from 'react';
 import { isGoogleAuthConfigured } from '@/services/auth/googleAuth';
 import { useWineStore } from '@/store/useWineStore';
+import { parseWineDatabase } from '@/types/validation';
 import { ToastBar } from '@/components/common/ToastBar';
 
 export function OnboardingView() {
@@ -29,6 +30,7 @@ export function OnboardingView() {
   const clientIdReady = isGoogleAuthConfigured();
 
   const handleGoogleStart = async () => {
+    if (busy) return;
     setBusy(true);
     try {
       await connectGoogleAndLoad();
@@ -37,7 +39,28 @@ export function OnboardingView() {
     }
   };
 
+  const handleInitEmpty = async () => {
+    if (busy) return;
+    setBusy(true);
+    try {
+      await initEmptyCellar();
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleStartLocal = async (withDemo: boolean) => {
+    if (busy) return;
+    setBusy(true);
+    try {
+      await startLocalTestMode(withDemo);
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const triggerJsonImport = (mode: 'google_drive' | 'local_test') => {
+    if (busy) return;
     setImportTargetMode(mode);
     fileInputRef.current?.click();
   };
@@ -45,16 +68,15 @@ export function OnboardingView() {
   const handleFileSelected = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     e.target.value = '';
-    if (!file) return;
+    if (!file || busy) return;
 
     setBusy(true);
     try {
       const text = await file.text();
       const parsed = JSON.parse(text) as unknown;
-      if (importTargetMode === 'local_test') {
-        useWineStore.setState({ storageMode: 'local_test' });
-      }
-      await importJsonDatabase(parsed);
+      const validated = parseWineDatabase(parsed);
+      useWineStore.setState({ storageMode: importTargetMode });
+      await importJsonDatabase(validated);
     } catch (err) {
       const msg = err instanceof Error ? err.message : '유효하지 않은 wine_db.json 파일입니다.';
       showToast(`JSON 검증 실패: ${msg}`, 'error');
@@ -64,11 +86,11 @@ export function OnboardingView() {
   };
 
   return (
-    <div className="relative flex min-h-dvh flex-col items-center justify-center bg-canvas px-4 py-10 text-primary">
+    <div className="relative flex min-h-dvh flex-col items-center justify-center bg-canvas px-4 pt-[calc(2.5rem+env(safe-area-inset-top,0px))] pb-[calc(2.5rem+env(safe-area-inset-bottom,0px))] text-primary">
       <button
         type="button"
         onClick={toggleTheme}
-        className="absolute right-5 top-5 rounded-full border border-subtle bg-surface p-2.5 text-secondary shadow-card hover:text-primary"
+        className="absolute right-5 top-[calc(1.25rem+env(safe-area-inset-top,0px))] rounded-full border border-subtle bg-surface p-2.5 text-secondary shadow-card hover:text-primary"
         aria-label="테마 전환"
       >
         {theme === 'dark' ? <Sun className="h-5 w-5" /> : <Moon className="h-5 w-5" />}
@@ -93,7 +115,7 @@ export function OnboardingView() {
         {/* Google Drive 연결 카드 */}
         <div className="space-y-4 rounded-3xl border border-subtle bg-surface p-6 shadow-card">
           <div className="flex items-center gap-2.5">
-            <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-forest/12 text-forest">
+            <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-forest/[0.12] text-forest">
               <Cloud className="h-5 w-5" />
             </div>
             <div>
@@ -140,8 +162,8 @@ export function OnboardingView() {
               <button
                 type="button"
                 disabled={busy}
-                onClick={() => void initEmptyCellar()}
-                className="flex w-full items-center justify-center gap-2 rounded-xl border border-subtle bg-elevated px-4 py-3 text-sm font-bold text-primary hover:bg-surface"
+                onClick={() => void handleInitEmpty()}
+                className="flex w-full items-center justify-center gap-2 rounded-xl border border-subtle bg-elevated px-4 py-3 text-sm font-bold text-primary hover:bg-surface disabled:opacity-50"
               >
                 <Sprout className="h-4 w-4 text-forest" />
                 <span>빈 셀러로 새로 시작하기 (기본 선반 템플릿)</span>
@@ -178,8 +200,8 @@ export function OnboardingView() {
             <button
               type="button"
               disabled={busy}
-              onClick={() => void startLocalTestMode(true)}
-              className="flex items-center justify-center gap-1.5 rounded-xl bg-gold px-3.5 py-2.5 text-xs font-bold text-white transition-opacity hover:opacity-90"
+              onClick={() => void handleStartLocal(true)}
+              className="flex items-center justify-center gap-1.5 rounded-xl bg-gold px-3.5 py-2.5 text-xs font-bold text-white transition-opacity hover:opacity-90 disabled:opacity-50"
             >
               <Sparkles className="h-4 w-4" />
               <span>데모 와인 6종으로 체험</span>
@@ -187,8 +209,8 @@ export function OnboardingView() {
             <button
               type="button"
               disabled={busy}
-              onClick={() => void startLocalTestMode(false)}
-              className="flex items-center justify-center gap-1.5 rounded-xl border border-subtle bg-elevated px-3.5 py-2.5 text-xs font-bold text-primary hover:bg-surface"
+              onClick={() => void handleStartLocal(false)}
+              className="flex items-center justify-center gap-1.5 rounded-xl border border-subtle bg-elevated px-3.5 py-2.5 text-xs font-bold text-primary hover:bg-surface disabled:opacity-50"
             >
               <Sprout className="h-4 w-4 text-forest" />
               <span>빈 셀러로 로컬 시작</span>

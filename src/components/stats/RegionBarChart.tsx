@@ -60,7 +60,9 @@ export function RegionBarChart({
 
       {data.length === 0 ? (
         <div className="flex h-56 items-center justify-center text-xs text-secondary">
-          보유 중인 와인이 없습니다.
+          {mode === 'subRegion' && countryData.length > 0
+            ? '세부지역이 등록된 보유 와인이 없습니다.'
+            : '보유 중인 와인이 없습니다.'}
         </div>
       ) : (
         <div className="h-60">

@@ -1,5 +1,5 @@
 import { Camera, ChevronDown, ChevronUp, Pencil, Plus, RotateCcw, Trash2, Users } from 'lucide-react';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { WINE_COLORS, type WineColor, type WineMaster } from '@/types/schema';
 import {
   buildWineMasterKey,
@@ -14,6 +14,7 @@ import { estimateDrinkingWindow } from '@/services/domain/drinkingWindowEstimato
 import { pickImageFile } from '@/services/media/photoPicker';
 import { useWineStore } from '@/store/useWineStore';
 import { BottomSheet } from '@/components/common/BottomSheet';
+import { ConfirmDialog } from '@/components/common/ConfirmDialog';
 import { PhotoLightbox, TastingPhotoThumb } from '@/components/common/PhotoLightbox';
 import { MemoText, PriceText } from '@/components/common/PriceText';
 import { StarRatingBadge } from '@/components/common/StarRating';
@@ -55,10 +56,30 @@ export function WineDetailSheet({ wineId, onClose }: WineDetailSheetProps) {
   const [draftSubRegion, setDraftSubRegion] = useState('');
   const [draftVintage, setDraftVintage] = useState('');
   const [draftColor, setDraftColor] = useState<WineColor>('R');
-  const [draftSizeMl, setDraftSizeMl] = useState(750);
+  const [draftSizeMlStr, setDraftSizeMlStr] = useState('750');
   const [draftDwStart, setDraftDwStart] = useState('');
   const [draftDwEnd, setDraftDwEnd] = useState('');
   const [masterError, setMasterError] = useState<string | null>(null);
+  const [savingMaster, setSavingMaster] = useState(false);
+  const [confirmState, setConfirmState] = useState<{
+    title: string;
+    message: string;
+    confirmLabel: string;
+    tone?: 'primary' | 'danger';
+    onConfirm: () => Promise<void>;
+  } | null>(null);
+  const [confirmBusy, setConfirmBusy] = useState(false);
+
+  // 와인 전환 시 이전 와인의 편집 상태·드래프트·서브모달·라이트박스 잔존 방지 (C7)
+  useEffect(() => {
+    setEditingMaster(false);
+    setShowPastHistory(false);
+    setConsumeBottleId(null);
+    setMoveBottleId(null);
+    setLightboxFileId(null);
+    setMasterError(null);
+    setConfirmState(null);
+  }, [wineId]);
 
   const locationMap = useMemo(
     () => new Map(db?.locations.map((l) => [l.id, l.displayName]) ?? []),
@@ -89,7 +110,7 @@ export function WineDetailSheet({ wineId, onClose }: WineDetailSheetProps) {
     setDraftSubRegion(wine.subRegion ?? '');
     setDraftVintage(wine.vintage);
     setDraftColor(wine.color);
-    setDraftSizeMl(wine.bottleSizeMl);
+    setDraftSizeMlStr(String(wine.bottleSizeMl));
     setDraftDwStart(wine.drinkingWindowStart ? String(wine.drinkingWindowStart) : '');
     setDraftDwEnd(wine.drinkingWindowEnd ? String(wine.drinkingWindowEnd) : '');
     setMasterError(null);
@@ -98,6 +119,7 @@ export function WineDetailSheet({ wineId, onClose }: WineDetailSheetProps) {
 
   const saveEditMaster = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (savingMaster) return;
     setMasterError(null);
     if (!draftName.trim()) {
       setMasterError('와인명을 입력해 주세요.');
@@ -105,6 +127,11 @@ export function WineDetailSheet({ wineId, onClose }: WineDetailSheetProps) {
     }
     if (!/^(\d{4}|NV)$/i.test(draftVintage.trim())) {
       setMasterError('빈티지는 4자리 연도 또는 NV로 입력해 주세요.');
+      return;
+    }
+    const parsedSizeMl = Number(draftSizeMlStr.trim());
+    if (!Number.isInteger(parsedSizeMl) || parsedSizeMl < 50 || parsedSizeMl > 18000) {
+      setMasterError('용량은 50~18000 사이의 정수(ml)로 입력해 주세요.');
       return;
     }
     const parsedStart = /^\d{4}$/.test(draftDwStart.trim()) ? Number(draftDwStart.trim()) : null;
@@ -121,31 +148,39 @@ export function WineDetailSheet({ wineId, onClose }: WineDetailSheetProps) {
       subRegion: draftSubRegion.trim() || undefined,
       vintage: draftVintage.trim().toUpperCase(),
       color: draftColor,
-      bottleSizeMl: draftSizeMl,
+      bottleSizeMl: parsedSizeMl,
       drinkingWindowStart: parsedStart,
       drinkingWindowEnd: parsedEnd,
     };
 
-    // ⑤ 보강: 수정 결과 기존 다른 마스터와 4중 키가 겹치면 확인 후 병합
+    // ⑤ 보강: 수정 결과 기존 다른 마스터와 4중 키가 겹치면 React 다이얼로그로 확인 후 병합
     const nextKey = buildWineMasterKey(nextPatch);
     const duplicateMaster = db?.wines.find(
       (w) => w.id !== wine.id && buildWineMasterKey(w) === nextKey,
     );
 
     if (duplicateMaster) {
-      const shouldMerge = window.confirm(
-        `동일한 와인('${duplicateMaster.name} ${duplicateMaster.vintage}')이 이미 존재합니다.\n두 항목을 하나로 병합할까요?`,
-      );
-      if (shouldMerge) {
-        await updateWineMaster(wine.id, nextPatch, duplicateMaster.id);
-        setEditingMaster(false);
-        onClose();
-        return;
-      }
+      setConfirmState({
+        title: '동일한 와인 병합',
+        message: `동일한 와인('${duplicateMaster.name} ${duplicateMaster.vintage}')이 이미 존재합니다.\n두 항목을 하나로 병합할까요?`,
+        confirmLabel: '병합하고 저장',
+        tone: 'primary',
+        onConfirm: async () => {
+          await updateWineMaster(wine.id, nextPatch, duplicateMaster.id);
+          setEditingMaster(false);
+          onClose();
+        },
+      });
+      return;
     }
 
-    await updateWineMaster(wine.id, nextPatch);
-    setEditingMaster(false);
+    setSavingMaster(true);
+    try {
+      await updateWineMaster(wine.id, nextPatch);
+      setEditingMaster(false);
+    } finally {
+      setSavingMaster(false);
+    }
   };
 
   const moveTargetBottle = inStockBottles.find((b) => b.id === moveBottleId) ?? null;
@@ -212,12 +247,18 @@ export function WineDetailSheet({ wineId, onClose }: WineDetailSheetProps) {
                   <button
                     type="button"
                     disabled={uploadingLabel}
-                    onClick={() => {
-                      if (window.confirm('등록된 라벨 사진을 삭제할까요?')) {
-                        void removeWineLabelPhoto(wine.id);
-                      }
-                    }}
-                    className="rounded-lg border border-subtle bg-surface p-1 text-secondary hover:border-[var(--status-danger)] hover:text-[var(--status-danger)]"
+                    onClick={() =>
+                      setConfirmState({
+                        title: '라벨 사진 삭제',
+                        message: '등록된 라벨 사진을 삭제할까요?',
+                        confirmLabel: '삭제',
+                        tone: 'danger',
+                        onConfirm: async () => {
+                          await removeWineLabelPhoto(wine.id);
+                        },
+                      })
+                    }
+                    className="rounded-lg border border-subtle bg-surface p-1 text-secondary hover:border-status-danger hover:text-status-danger"
                     title="라벨 사진 삭제"
                     aria-label="라벨 사진 삭제"
                   >
@@ -338,8 +379,11 @@ export function WineDetailSheet({ wineId, onClose }: WineDetailSheetProps) {
                 </select>
                 <input
                   type="number"
-                  value={draftSizeMl}
-                  onChange={(e) => setDraftSizeMl(Number(e.target.value) || 750)}
+                  min={50}
+                  max={18000}
+                  step={1}
+                  value={draftSizeMlStr}
+                  onChange={(e) => setDraftSizeMlStr(e.target.value)}
                   placeholder="용량 ml"
                   className="rounded-xl border border-subtle bg-surface px-3 py-2 text-xs tabular-nums text-primary"
                 />
@@ -397,23 +441,25 @@ export function WineDetailSheet({ wineId, onClose }: WineDetailSheetProps) {
                 </div>
               </div>
               {masterError && (
-                <p className="rounded-lg border border-[var(--status-danger)]/35 bg-[var(--status-danger)]/10 px-2.5 py-1.5 text-[11px] font-semibold text-[var(--status-danger)]">
+                <p className="rounded-lg border border-status-danger/35 bg-status-danger/10 px-2.5 py-1.5 text-[11px] font-semibold text-status-danger">
                   {masterError}
                 </p>
               )}
               <div className="flex justify-end gap-2">
                 <button
                   type="button"
+                  disabled={savingMaster}
                   onClick={() => setEditingMaster(false)}
-                  className="rounded-lg border border-subtle bg-surface px-3 py-1.5 text-xs font-semibold text-secondary"
+                  className="rounded-lg border border-subtle bg-surface px-3 py-1.5 text-xs font-semibold text-secondary disabled:opacity-50"
                 >
                   취소
                 </button>
                 <button
                   type="submit"
-                  className="rounded-lg bg-forest px-3.5 py-1.5 text-xs font-bold text-white"
+                  disabled={savingMaster}
+                  className="rounded-lg bg-forest px-3.5 py-1.5 text-xs font-bold text-white disabled:opacity-50"
                 >
-                  변경 저장
+                  {savingMaster ? '저장 중...' : '변경 저장'}
                 </button>
               </div>
             </form>
@@ -503,15 +549,17 @@ export function WineDetailSheet({ wineId, onClose }: WineDetailSheetProps) {
                             <PriceText value={bottle.purchasePrice} className="font-semibold text-secondary" />
                             <button
                               type="button"
-                              onClick={() => {
-                                if (
-                                  window.confirm(
-                                    `이 병을 '${restoreTargetName}' 위치로 보유 복원할까요?\n(연결된 소비·선물 이력은 삭제됩니다.)`,
-                                  )
-                                ) {
-                                  void restoreBottleToStock(bottle.id, validPrevLocId);
-                                }
-                              }}
+                              onClick={() =>
+                                setConfirmState({
+                                  title: '보유 상태로 복원',
+                                  message: `이 병을 '${restoreTargetName}' 위치로 보유 복원할까요?\n(연결된 소비·선물 이력은 삭제됩니다.)`,
+                                  confirmLabel: '복원',
+                                  tone: 'primary',
+                                  onConfirm: async () => {
+                                    await restoreBottleToStock(bottle.id, validPrevLocId);
+                                  },
+                                })
+                              }
                               className="inline-flex items-center gap-1 rounded-md border border-subtle bg-elevated px-2 py-0.5 text-[11px] font-semibold text-secondary hover:border-forest hover:text-forest"
                               title="보유 상태로 복원"
                             >
@@ -572,6 +620,26 @@ export function WineDetailSheet({ wineId, onClose }: WineDetailSheetProps) {
         fileId={lightboxFileId}
         alt={`${wine.name} 사진`}
         onClose={() => setLightboxFileId(null)}
+      />
+
+      <ConfirmDialog
+        open={Boolean(confirmState)}
+        title={confirmState?.title ?? ''}
+        message={confirmState?.message ?? ''}
+        confirmLabel={confirmState?.confirmLabel}
+        tone={confirmState?.tone}
+        busy={confirmBusy}
+        onCancel={() => setConfirmState(null)}
+        onConfirm={async () => {
+          if (!confirmState || confirmBusy) return;
+          setConfirmBusy(true);
+          try {
+            await confirmState.onConfirm();
+            setConfirmState(null);
+          } finally {
+            setConfirmBusy(false);
+          }
+        }}
       />
     </>
   );

@@ -24,11 +24,14 @@ from __future__ import annotations
 import argparse
 import base64
 from concurrent.futures import ThreadPoolExecutor, as_completed
+import http.client
 import json
 import mimetypes
 import os
 import re
+import threading
 import time
+import unicodedata
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -38,10 +41,22 @@ from typing import Any, Dict, List, Optional, Tuple
 
 USER_AGENT = "JHWineForestLabelReview/1.0 (+https://github.com/Jihoon2-Jung/wine-forest)"
 IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp"}
+EXT_TO_MIME = {
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".png": "image/png",
+    ".webp": "image/webp",
+}
+MAX_LOCAL_IMAGE_BYTES = 20 * 1024 * 1024
 
 
 def normalize_token(text: str) -> str:
-    return re.sub(r"[^a-z0-9가-힣]+", "", text.lower())
+    nfc = unicodedata.normalize("NFC", text)
+    return re.sub(r"[^a-z0-9가-힣]+", "", nfc.lower())
+
+
+def normalize_group_name(text: str) -> str:
+    return unicodedata.normalize("NFC", re.sub(r"\s+", " ", text.strip())).lower()
 
 
 def build_search_query(wine: Dict[str, Any]) -> str:
@@ -55,8 +70,15 @@ def http_get_json(url: str, timeout: float = 4.0) -> Optional[Dict[str, Any]]:
     try:
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             raw = resp.read().decode("utf-8", errors="replace")
-            return json.loads(raw)
-    except (urllib.error.URLError, TimeoutError, json.JSONDecodeError, OSError):
+            parsed = json.loads(raw)
+            return parsed if isinstance(parsed, dict) else None
+    except (
+        urllib.error.URLError,
+        http.client.HTTPException,
+        TimeoutError,
+        json.JSONDecodeError,
+        OSError,
+    ):
         return None
 
 
@@ -217,7 +239,12 @@ def match_local_candidates(
     if not local_index:
         return []
     wine_key = normalize_token(str(wine.get("name", "")))
-    vintage = str(wine.get("vintage", "")).strip()
+    raw_vintages = wine.get("vintages")
+    if isinstance(raw_vintages, list) and raw_vintages:
+        vintages = [str(v).strip() for v in raw_vintages if str(v).strip()]
+    else:
+        single_v = str(wine.get("vintage", "")).strip()
+        vintages = [single_v] if single_v else []
     if len(wine_key) < 3:
         return []
 
@@ -228,7 +255,7 @@ def match_local_candidates(
         score = 0
         if wine_key in stem_key or stem_key in wine_key:
             score += 10
-        if vintage and vintage.upper() != "NV" and vintage in stem_key:
+        if any(v.upper() != "NV" and v in stem_key for v in vintages):
             score += 4
         if score >= 10:
             scored.append((score, path))
@@ -236,9 +263,14 @@ def match_local_candidates(
     scored.sort(key=lambda x: x[0], reverse=True)
     results: List[Dict[str, str]] = []
     for _, path in scored[:limit]:
-        mime, _ = mimetypes.guess_type(str(path))
-        mime = mime or "image/jpeg"
-        b64 = base64.b64encode(path.read_bytes()).decode("ascii")
+        try:
+            if path.stat().st_size > MAX_LOCAL_IMAGE_BYTES:
+                continue
+            raw_bytes = path.read_bytes()
+        except OSError:
+            continue
+        mime = EXT_TO_MIME.get(path.suffix.lower()) or mimetypes.guess_type(str(path))[0] or "image/jpeg"
+        b64 = base64.b64encode(raw_bytes).decode("ascii")
         results.append(
             {
                 "url": f"data:{mime};base64,{b64}",
@@ -269,15 +301,16 @@ def select_target_wines(
     for w in db.get("wines", []):
         wid = str(w.get("id", ""))
         name = str(w.get("name", "")).strip()
+        norm_name = normalize_group_name(name)
         color = str(w.get("color", "R")).strip().upper()
         vintage = str(w.get("vintage", "NV")).strip()
         stock_qty = in_stock_counts.get(wid, 0)
-        key = (name.lower(), color)
+        key = (norm_name, color)
 
         entry = grouped.get(key)
         if not entry:
             entry = {
-                "groupKey": f"{name.lower()}|{color}",
+                "groupKey": f"{norm_name}|{color}",
                 "wineId": wid,
                 "wineIds": [],
                 "name": name,
@@ -306,7 +339,8 @@ def select_target_wines(
     for entry in grouped.values():
         if not include_out_of_stock and entry["inStockCount"] <= 0:
             continue
-        if not include_existing_labels and not entry["missingAnyLabel"]:
+        # 빈티지 무관 1라벨 정책: 그룹 내 어느 빈티지든 이미 라벨이 있으면 기본 제외 (--include-existing으로 포함 가능)
+        if not include_existing_labels and entry["hasAnyLabel"]:
             continue
         entry["vintages"].sort()
         entry["vintage"] = ", ".join(entry["vintages"]) if entry["vintages"] else "NV"
@@ -478,9 +512,14 @@ HTML_TEMPLATE = """<!doctype html>
       }
     }
 
+    let reviewDbPromise = null;
+    let saveQueue = Promise.resolve();
+
     function openReviewDb() {
-      return new Promise((resolve, reject) => {
+      if (reviewDbPromise) return reviewDbPromise;
+      reviewDbPromise = new Promise((resolve, reject) => {
         if (typeof indexedDB === 'undefined') {
+          reviewDbPromise = null;
           reject(new Error('IndexedDB를 사용할 수 없습니다.'));
           return;
         }
@@ -491,9 +530,21 @@ HTML_TEMPLATE = """<!doctype html>
             db.createObjectStore(IDB_STORE);
           }
         };
-        req.onsuccess = () => resolve(req.result);
-        req.onerror = () => reject(req.error || new Error('IndexedDB 열기 실패'));
+        req.onsuccess = () => {
+          const db = req.result;
+          db.onclose = () => { reviewDbPromise = null; };
+          db.onversionchange = () => {
+            db.close();
+            reviewDbPromise = null;
+          };
+          resolve(db);
+        };
+        req.onerror = () => {
+          reviewDbPromise = null;
+          reject(req.error || new Error('IndexedDB 열기 실패'));
+        };
       });
+      return reviewDbPromise;
     }
 
     async function loadSelectionsFromStorage() {
@@ -504,6 +555,7 @@ HTML_TEMPLATE = """<!doctype html>
           const req = tx.objectStore(IDB_STORE).get(IDB_KEY);
           req.onsuccess = () => resolve(req.result);
           req.onerror = () => reject(req.error || new Error('IndexedDB 읽기 실패'));
+          tx.onabort = () => reject(tx.error || new Error('IndexedDB 읽기 중단'));
         });
         if (saved && typeof saved === 'object') {
           return saved;
@@ -525,6 +577,7 @@ HTML_TEMPLATE = """<!doctype html>
                 tx.objectStore(IDB_STORE).put(parsed, IDB_KEY);
                 tx.oncomplete = () => resolve();
                 tx.onerror = () => reject(tx.error || new Error('마이그레이션 저장 실패'));
+                tx.onabort = () => reject(tx.error || new Error('마이그레이션 저장 중단'));
               });
               localStorage.removeItem(STORAGE_KEY);
             } catch {
@@ -539,31 +592,37 @@ HTML_TEMPLATE = """<!doctype html>
       return {};
     }
 
-    async function saveSelections() {
+    function saveSelections() {
       updateHeader();
-      try {
-        const db = await openReviewDb();
-        await new Promise((resolve, reject) => {
-          const tx = db.transaction(IDB_STORE, 'readwrite');
-          tx.objectStore(IDB_STORE).put(selections, IDB_KEY);
-          tx.oncomplete = () => resolve();
-          tx.onerror = () => reject(tx.error || new Error('IndexedDB 저장 실패'));
-        });
-        showStorageWarning('');
-        return;
-      } catch {
-        // IndexedDB 실패 시 localStorage 폴백 시도
-      }
+      const snapshot = { ...selections };
+      saveQueue = saveQueue.then(async () => {
+        try {
+          const db = await openReviewDb();
+          await new Promise((resolve, reject) => {
+            const tx = db.transaction(IDB_STORE, 'readwrite');
+            tx.objectStore(IDB_STORE).put(snapshot, IDB_KEY);
+            tx.oncomplete = () => resolve();
+            tx.onerror = () => reject(tx.error || new Error('IndexedDB 저장 실패'));
+            tx.onabort = () => reject(tx.error || new Error('IndexedDB 저장 중단'));
+          });
+          showStorageWarning('');
+          return;
+        } catch {
+          reviewDbPromise = null;
+          // IndexedDB 실패 시 localStorage 폴백 시도
+        }
 
-      try {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(selections));
-        showStorageWarning('');
-      } catch (err) {
-        const detail = err && err.message ? err.message : '브라우저 저장 용량 초과';
-        showStorageWarning(
-          `⚠️ 자동 저장에 실패했습니다 (${detail}). 새로고침하면 최근 작업이 유실될 수 있으니 지금 [승인 라벨 번들 내보내기]로 중간 저장해 주세요.`
-        );
-      }
+        try {
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(snapshot));
+          showStorageWarning('');
+        } catch (err) {
+          const detail = err && err.message ? err.message : '브라우저 저장 용량 초과';
+          showStorageWarning(
+            `⚠️ 자동 저장에 실패했습니다 (${detail}). 새로고침하면 최근 작업이 유실될 수 있으니 지금 [승인 라벨 번들 내보내기]로 중간 저장해 주세요.`
+          );
+        }
+      });
+      return saveQueue;
     }
 
     function updateHeader() {
@@ -591,6 +650,10 @@ HTML_TEMPLATE = """<!doctype html>
           ctx.drawImage(img, 0, 0, w, h);
           let out = canvas.toDataURL('image/webp', quality);
           if (!out.startsWith('data:image/webp')) {
+            // JPEG 폴백 시 투명 PNG 배경이 검게 변하지 않도록 흰색 바탕 채우기
+            ctx.globalCompositeOperation = 'destination-over';
+            ctx.fillStyle = '#ffffff';
+            ctx.fillRect(0, 0, w, h);
             out = canvas.toDataURL('image/jpeg', quality);
           }
           resolve(out);
@@ -609,10 +672,16 @@ HTML_TEMPLATE = """<!doctype html>
         const blob = await resp.blob();
         return blobToCompressedWebPDataUrl(blob);
       }
-      const resp = await fetch(src, { mode: 'cors' });
-      if (!resp.ok) throw new Error('CORS/네트워크 다운로드 실패');
-      const blob = await resp.blob();
-      return blobToCompressedWebPDataUrl(blob);
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 10000);
+      try {
+        const resp = await fetch(src, { mode: 'cors', signal: controller.signal });
+        if (!resp.ok) throw new Error('CORS/네트워크 다운로드 실패');
+        const blob = await resp.blob();
+        return blobToCompressedWebPDataUrl(blob);
+      } finally {
+        clearTimeout(timer);
+      }
     }
 
     async function setWineSelectionFromBlob(wineId, blob, source = 'direct', sourceTitle = '') {
@@ -650,7 +719,11 @@ HTML_TEMPLATE = """<!doctype html>
           e.preventDefault();
           const blob = it.getAsFile();
           if (blob) {
-            await setWineSelectionFromBlob(activeWineId, blob);
+            try {
+              await setWineSelectionFromBlob(activeWineId, blob);
+            } catch {
+              alert('붙여넣은 이미지를 처리하는 중 오류가 발생했습니다.');
+            }
           }
           return;
         }
@@ -672,6 +745,11 @@ HTML_TEMPLATE = """<!doctype html>
         }
         return true;
       });
+
+      // 필터 변경·승인으로 기존 포커스 카드가 숨겨지면 숨겨진 카드 덮어쓰기 방지 (H8)
+      if (activeWineId && !filtered.some((w) => (w.groupKey || w.wineId) === activeWineId)) {
+        activeWineId = null;
+      }
 
       for (const w of filtered) {
         const key = w.groupKey || w.wineId;
@@ -775,19 +853,35 @@ HTML_TEMPLATE = """<!doctype html>
           candWrap.style.display = 'none';
         }
 
-        // URL 입력 (DOM 프로퍼티로 안전하게 바인딩)
+        // URL 입력 (안전한 스킴 검증 + Enter/change 중복 실행 방지)
         const urlInput = card.querySelector('input[type="url"]');
         urlInput.value = sel?.url || '';
+        const applyUrlValue = async () => {
+          const trimmed = urlInput.value.trim();
+          if (!trimmed) return;
+          if (!isSafeImageSrc(trimmed)) {
+            alert('유효한 http(s) 이미지 URL 또는 data:image URI를 입력해 주세요.');
+            return;
+          }
+          if (selections[key]?.url === trimmed) return;
+          if (trimmed.startsWith('data:image/')) {
+            try {
+              await setWineSelectionFromDataUrl(key, trimmed, 'url');
+            } catch {
+              alert('입력한 이미지 데이터를 처리하는 중 오류가 발생했습니다.');
+            }
+          } else {
+            await setWineSelectionFromUrl(key, trimmed, 'url');
+          }
+        };
         urlInput.addEventListener('keydown', (ev) => {
-          if (ev.key === 'Enter' && urlInput.value.trim()) {
+          if (ev.key === 'Enter') {
             ev.preventDefault();
-            void setWineSelectionFromUrl(key, urlInput.value.trim(), 'url');
+            void applyUrlValue();
           }
         });
         urlInput.addEventListener('change', () => {
-          if (urlInput.value.trim()) {
-            void setWineSelectionFromUrl(key, urlInput.value.trim(), 'url');
-          }
+          void applyUrlValue();
         });
 
         // 로컬 파일 선택
@@ -798,7 +892,13 @@ HTML_TEMPLATE = """<!doctype html>
           fi.accept = 'image/*';
           fi.onchange = async () => {
             const f = fi.files?.[0];
-            if (f) await setWineSelectionFromBlob(key, f);
+            if (f) {
+              try {
+                await setWineSelectionFromBlob(key, f);
+              } catch {
+                alert('선택한 이미지 파일을 처리하는 중 오류가 발생했습니다.');
+              }
+            }
           };
           fi.click();
         });
@@ -812,7 +912,11 @@ HTML_TEMPLATE = """<!doctype html>
           dz.classList.remove('drag');
           const f = ev.dataTransfer?.files?.[0];
           if (f && f.type.startsWith('image/')) {
-            await setWineSelectionFromBlob(key, f);
+            try {
+              await setWineSelectionFromBlob(key, f);
+            } catch {
+              alert('드롭한 이미지 파일을 처리하는 중 오류가 발생했습니다.');
+            }
           }
         });
 
@@ -859,30 +963,33 @@ HTML_TEMPLATE = """<!doctype html>
       const exportedItems = [];
       const failedNames = [];
 
-      for (let i = 0; i < approvedEntries.length; i++) {
-        const w = approvedEntries[i];
-        const sel = selections[w.groupKey || w.wineId];
-        prog.textContent = `500px WebP 압축 중... (${i + 1}/${approvedEntries.length})`;
-        try {
-          const dataUrl = sel.dataUrl && sel.compressed
-            ? sel.dataUrl
-            : await urlToCompressedDataUrl(sel.dataUrl || sel.url);
-          const mimeMatch = dataUrl.match(/^data:(image\\/[a-zA-Z0-9.+-]+);base64,/);
-          exportedItems.push({
-            wineId: w.wineId,
-            wineIds: w.wineIds || [w.wineId],
-            wineName: w.name,
-            color: w.color,
-            vintage: w.vintage,
-            mimeType: mimeMatch ? mimeMatch[1] : 'image/webp',
-            dataUrl,
-          });
-        } catch {
-          failedNames.push(w.name);
+      try {
+        for (let i = 0; i < approvedEntries.length; i++) {
+          const w = approvedEntries[i];
+          const sel = selections[w.groupKey || w.wineId];
+          prog.textContent = `500px WebP 압축 중... (${i + 1}/${approvedEntries.length})`;
+          try {
+            const dataUrl = sel.dataUrl && sel.compressed
+              ? sel.dataUrl
+              : await urlToCompressedDataUrl(sel.dataUrl || sel.url);
+            const mimeMatch = dataUrl.match(/^data:(image\\/[a-zA-Z0-9.+-]+);base64,/);
+            exportedItems.push({
+              wineId: w.wineId,
+              wineIds: w.wineIds || [w.wineId],
+              wineName: w.name,
+              color: w.color,
+              vintage: w.vintage,
+              mimeType: mimeMatch ? mimeMatch[1] : 'image/webp',
+              dataUrl,
+            });
+          } catch {
+            failedNames.push(w.name);
+          }
         }
+      } finally {
+        btn.disabled = false;
       }
 
-      btn.disabled = false;
       prog.textContent = `완료: ${exportedItems.length}건 내보내기${failedNames.length ? ` (CORS 실패 ${failedNames.length}건 — 이미지 복사 후 Cmd+V로 재시도하세요)` : ''}`;
 
       if (exportedItems.length === 0) {
@@ -897,13 +1004,15 @@ HTML_TEMPLATE = """<!doctype html>
       };
       const blob = new Blob([JSON.stringify(payload)], { type: 'application/json' });
       const dlUrl = URL.createObjectURL(blob);
+      const now = new Date();
+      const yyyymmdd = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}`;
       const a = document.createElement('a');
       a.href = dlUrl;
-      a.download = `approved_labels_${new Date().toISOString().slice(0, 10).replace(/-/g, '')}.json`;
+      a.download = `approved_labels_${yyyymmdd}.json`;
       document.body.appendChild(a);
       a.click();
       a.remove();
-      URL.revokeObjectURL(dlUrl);
+      setTimeout(() => URL.revokeObjectURL(dlUrl), 1000);
 
       if (failedNames.length > 0) {
         alert(`성공 ${exportedItems.length}건을 저장했습니다.\\n\\n외부 사이트 CORS 제한으로 누락된 ${failedNames.length}건은 해당 이미지를 복사해 카드에 Cmd+V로 붙여넣은 뒤 다시 내보내 주세요:\\n- ${failedNames.slice(0, 8).join('\\n- ')}`);
@@ -931,8 +1040,9 @@ def generate_review_html(
     google_cse_cx: Optional[str] = None,
     serpapi_key: Optional[str] = None,
     limit: Optional[int] = None,
-    delay_sec: float = 0.25,
+    delay_sec: float = 0.2,
 ) -> Dict[str, int]:
+    mimetypes.init()
     db = json.loads(input_json.read_text(encoding="utf-8"))
     targets = select_target_wines(
         db,
@@ -944,11 +1054,29 @@ def generate_review_html(
     total = len(targets)
     with_candidates = 0
 
+    rate_lock = threading.Lock()
+    next_remote_slot = [0.0]
+
+    def wait_remote_slot() -> None:
+        if delay_sec <= 0:
+            return
+        with rate_lock:
+            now = time.monotonic()
+            wait_for = next_remote_slot[0] - now
+            if wait_for > 0:
+                next_remote_slot[0] += delay_sec
+            else:
+                next_remote_slot[0] = now + delay_sec
+                wait_for = 0.0
+        if wait_for > 0:
+            time.sleep(wait_for)
+
     def fetch_for_item(item: Dict[str, Any]) -> Tuple[Dict[str, Any], List[Dict[str, str]]]:
         candidates: List[Dict[str, str]] = []
         candidates.extend(match_local_candidates(item, local_index, limit=3))
 
         if not skip_remote_search:
+            wait_remote_slot()
             if google_cse_key and google_cse_cx:
                 candidates.extend(
                     search_google_cse(item["searchQuery"], google_cse_key, google_cse_cx, limit=4)
@@ -958,9 +1086,6 @@ def generate_review_html(
             else:
                 candidates.extend(search_open_food_facts(item["name"], limit=2))
                 candidates.extend(search_wikimedia_commons(item["name"], limit=2))
-
-            if delay_sec > 0:
-                time.sleep(delay_sec)
 
         deduped: List[Dict[str, str]] = []
         seen_urls = set()
@@ -975,7 +1100,11 @@ def generate_review_html(
 
     if skip_remote_search or total <= 1:
         for item in targets:
-            _, deduped = fetch_for_item(item)
+            try:
+                _, deduped = fetch_for_item(item)
+            except Exception as exc:
+                print(f"[경고] '{item.get('name')}' 후보 검색 중 예외 무시: {exc}", flush=True)
+                deduped = []
             item["candidates"] = deduped
             if deduped:
                 with_candidates += 1
@@ -983,9 +1112,14 @@ def generate_review_html(
         print(f"[진행] 총 {total}종 라벨 후보 검색 시작 (병렬 6스레드)...", flush=True)
         done_count = 0
         with ThreadPoolExecutor(max_workers=6) as pool:
-            futures = [pool.submit(fetch_for_item, item) for item in targets]
-            for fut in as_completed(futures):
-                item, deduped = fut.result()
+            future_to_item = {pool.submit(fetch_for_item, item): item for item in targets}
+            for fut in as_completed(future_to_item):
+                orig_item = future_to_item[fut]
+                try:
+                    item, deduped = fut.result()
+                except Exception as exc:
+                    print(f"[경고] '{orig_item.get('name')}' 후보 검색 중 예외 무시: {exc}", flush=True)
+                    item, deduped = orig_item, []
                 item["candidates"] = deduped
                 if deduped:
                     with_candidates += 1
@@ -996,8 +1130,15 @@ def generate_review_html(
                         flush=True,
                     )
 
-    # </script> 이스케이프 보호
-    safe_json = json.dumps(targets, ensure_ascii=False).replace("</", "<\\/")
+    # HTML5 <script> 파서 안전 이스케이프 (</script>, <!--, <script, U+2028/U+2029 차단)
+    safe_json = (
+        json.dumps(targets, ensure_ascii=False)
+        .replace("<", "\\u003c")
+        .replace(">", "\\u003e")
+        .replace("&", "\\u0026")
+        .replace("\u2028", "\\u2028")
+        .replace("\u2029", "\\u2029")
+    )
     html = HTML_TEMPLATE.replace("__PAYLOAD_JSON__", safe_json)
     out_html.parent.mkdir(parents=True, exist_ok=True)
     out_html.write_text(html, encoding="utf-8")

@@ -28,6 +28,8 @@ export class NativeGoogleAuthAdapter implements AuthAdapter {
   };
 
   private inflightRefresh: Promise<string> | null = null;
+  private inflightForcedRefresh: Promise<string> | null = null;
+  private sessionGeneration = 0;
 
   constructor(
     private readonly plugin: GoogleDriveAuthPlugin = GoogleDriveAuth,
@@ -56,6 +58,14 @@ export class NativeGoogleAuthAdapter implements AuthAdapter {
     return this.session.email;
   }
 
+  invalidateToken(): void {
+    this.session = {
+      ...this.session,
+      accessToken: null,
+      expiresAt: 0,
+    };
+  }
+
   private clearSessionState(): void {
     this.session = {
       accessToken: null,
@@ -64,7 +74,19 @@ export class NativeGoogleAuthAdapter implements AuthAdapter {
     };
   }
 
-  private applySessionResult(res: NativeAuthSessionResult): AuthTokenResult | null {
+  private isTransientNetworkError(combinedUpper: string): boolean {
+    return /NETWORK|OFFLINE|INTERNET|TIMED?\s*OUT|NSURLERROR|CONNECTION|FAILED TO FETCH/i.test(
+      combinedUpper,
+    );
+  }
+
+  private applySessionResult(
+    res: NativeAuthSessionResult,
+    expectedGen: number,
+  ): AuthTokenResult | null {
+    if (expectedGen !== this.sessionGeneration) {
+      return null;
+    }
     if (!res || res.signedIn === false || !res.accessToken) {
       return null;
     }
@@ -110,6 +132,11 @@ export class NativeGoogleAuthAdapter implements AuthAdapter {
       return new AuthRequiredError('구글 인증 세션이 만료되었습니다. 다시 로그인해 주세요.');
     }
     if (mode === 'silent') {
+      // 오프라인/일시 네트워크 단절 시 세션을 영구 삭제하지 않고 네트워크 오류로 전달해 온라인 복구 시 자동 갱신 유지
+      if (this.isTransientNetworkError(combined)) {
+        this.invalidateToken();
+        return new Error(rawMsg || '네트워크 연결이 불안정해 토큰을 갱신할 수 없습니다.');
+      }
       this.clearSessionState();
       return new AuthRequiredError(rawMsg || '구글 인증 세션이 만료되었습니다. 다시 로그인해 주세요.');
     }
@@ -122,16 +149,25 @@ export class NativeGoogleAuthAdapter implements AuthAdapter {
       return this.session.accessToken;
     }
 
-    if (this.inflightRefresh) {
+    if (forceRefresh) {
+      if (this.inflightForcedRefresh) {
+        return this.inflightForcedRefresh;
+      }
+    } else if (this.inflightForcedRefresh) {
+      return this.inflightForcedRefresh;
+    } else if (this.inflightRefresh) {
       return this.inflightRefresh;
     }
 
+    const startGen = this.sessionGeneration;
     const task = (async (): Promise<string> => {
       try {
         const res = await this.plugin.getAccessToken({ forceRefresh });
-        const applied = this.applySessionResult(res);
+        const applied = this.applySessionResult(res, startGen);
         if (!applied) {
-          this.clearSessionState();
+          if (startGen === this.sessionGeneration) {
+            this.clearSessionState();
+          }
           throw new AuthRequiredError('구글 인증 세션이 만료되었습니다. 다시 로그인해 주세요.');
         }
         return applied.accessToken;
@@ -143,35 +179,47 @@ export class NativeGoogleAuthAdapter implements AuthAdapter {
       }
     })();
 
-    this.inflightRefresh = task;
+    if (forceRefresh) {
+      this.inflightForcedRefresh = task;
+    } else {
+      this.inflightRefresh = task;
+    }
     try {
       return await task;
     } finally {
-      if (this.inflightRefresh === task) {
+      if (forceRefresh && this.inflightForcedRefresh === task) {
+        this.inflightForcedRefresh = null;
+      } else if (!forceRefresh && this.inflightRefresh === task) {
         this.inflightRefresh = null;
       }
     }
   }
 
   async restoreSession(): Promise<AuthTokenResult | null> {
+    const startGen = this.sessionGeneration;
     try {
       const res = await this.plugin.restoreSession();
-      const applied = this.applySessionResult(res);
+      const applied = this.applySessionResult(res, startGen);
       if (!applied) {
-        this.clearSessionState();
+        if (startGen === this.sessionGeneration) {
+          this.clearSessionState();
+        }
         return null;
       }
       return applied;
     } catch {
-      this.clearSessionState();
+      if (startGen === this.sessionGeneration) {
+        this.invalidateToken();
+      }
       return null;
     }
   }
 
   async signIn(): Promise<AuthTokenResult> {
+    const startGen = this.sessionGeneration;
     try {
       const res = await this.plugin.signIn();
-      const applied = this.applySessionResult(res);
+      const applied = this.applySessionResult(res, startGen);
       if (!applied) {
         throw new Error('구글 로그인에 실패했습니다.');
       }
@@ -185,8 +233,10 @@ export class NativeGoogleAuthAdapter implements AuthAdapter {
   }
 
   async signOut(): Promise<void> {
+    this.sessionGeneration += 1;
     this.clearSessionState();
     this.inflightRefresh = null;
+    this.inflightForcedRefresh = null;
     try {
       await this.plugin.signOut();
     } catch {

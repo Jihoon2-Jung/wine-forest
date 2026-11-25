@@ -30,7 +30,12 @@ export function HistoryPage() {
     if (!db) {
       return {
         years: [] as string[],
-        groupedTimeline: [] as Array<{ monthKey: string; label: string; items: EnrichedHistoryItem[] }>,
+        groupedTimeline: [] as Array<{
+          monthKey: string;
+          label: string;
+          items: EnrichedHistoryItem[];
+          totalInGroup: number;
+        }>,
         totalCount: 0,
         displayedCount: 0,
         sortedLocations: [],
@@ -96,12 +101,26 @@ export function HistoryPage() {
         years: [...yearSet].sort((a, b) => b.localeCompare(a)),
         groupedTimeline:
           sliced.length > 0
-            ? [{ monthKey: 'BY_RATING', label: '평점 높은순', items: sliced }]
+            ? [
+                {
+                  monthKey: 'BY_RATING',
+                  label: '평점 높은순',
+                  items: sliced,
+                  totalInGroup: filtered.length,
+                },
+              ]
             : [],
         totalCount: filtered.length,
         displayedCount: sliced.length,
         sortedLocations: [...db.locations].sort((a, b) => a.sortOrder - b.sortOrder),
       };
+    }
+
+    // 전체 필터링 결과의 월별 총 건수를 먼저 집계 (페이지네이션 경계 월 카운트 오차 방지)
+    const fullMonthTotals = new Map<string, number>();
+    for (const item of filtered) {
+      const monthKey = item.tasting.eventDate ? item.tasting.eventDate.slice(0, 7) : 'UNKNOWN';
+      fullMonthTotals.set(monthKey, (fullMonthTotals.get(monthKey) ?? 0) + 1);
     }
 
     // M4 보강: eventDate === null은 최하단 '날짜 미상' 그룹으로 분리
@@ -124,7 +143,12 @@ export function HistoryPage() {
           monthKey === 'UNKNOWN'
             ? '날짜 미상'
             : `${monthKey.slice(0, 4)}년 ${Number(monthKey.slice(5, 7))}월`;
-        return { monthKey, label, items };
+        return {
+          monthKey,
+          label,
+          items,
+          totalInGroup: fullMonthTotals.get(monthKey) ?? items.length,
+        };
       });
 
     return {
@@ -191,6 +215,9 @@ export function HistoryPage() {
             className="rounded-xl border border-subtle bg-elevated px-3 py-2 text-xs font-semibold tabular-nums text-primary focus:border-forest focus:outline-none"
           >
             <option value="ALL">연도: 전체</option>
+            {yearFilter !== 'ALL' && yearFilter !== 'UNKNOWN' && !years.includes(yearFilter) && (
+              <option value={yearFilter}>{yearFilter}년 (0)</option>
+            )}
             {years.map((y) => (
               <option key={y} value={y}>
                 {y}년
@@ -243,7 +270,13 @@ export function HistoryPage() {
               <div className="flex items-center justify-between px-1">
                 <h3 className="text-sm font-extrabold text-primary tabular-nums">
                   {group.label}{' '}
-                  <span className="font-semibold text-secondary">({group.items.length}병)</span>
+                  <span className="font-semibold text-secondary">
+                    (
+                    {group.items.length < group.totalInGroup
+                      ? `${group.items.length}/${group.totalInGroup}병`
+                      : `${group.items.length}병`}
+                    )
+                  </span>
                 </h3>
               </div>
               <div className="space-y-2">

@@ -31,7 +31,13 @@ import {
 import { estimateDrinkingWindow } from '@/services/domain/drinkingWindowEstimator';
 import { createDemoDatabase, createEmptyDatabase } from '@/services/storage/defaultTemplates';
 import { GoogleDriveAdapter } from '@/services/storage/googleDriveAdapter';
-import { clearCachedState, loadCachedState, saveCachedState } from '@/services/storage/localCache';
+import {
+  clearAllLocalBackups,
+  clearCachedState,
+  getCachedPhoto,
+  loadCachedState,
+  saveCachedState,
+} from '@/services/storage/localCache';
 import { LocalOnlyAdapter } from '@/services/storage/localOnlyAdapter';
 import { syncEngine } from '@/services/storage/syncEngine';
 import { compressImageFile, dataUrlToBlob } from '@/services/media/imageProcessor';
@@ -43,10 +49,13 @@ import {
 import {
   AuthRequiredError,
   ConflictError,
+  FileNotFoundError,
   type BackupSnapshot,
   type StorageAdapter,
   type StorageMode,
 } from '@/services/storage/types';
+
+export type CommitResult = 'synced' | 'queued_local' | 'conflict' | 'error' | 'invalid';
 
 export type ThemeMode = 'light' | 'dark';
 export type SyncStatus = 'synced' | 'offline_cache' | 'syncing' | 'auth_required' | 'conflict' | 'error';
@@ -293,9 +302,10 @@ interface WineStoreState {
         'eventDate' | 'occasion' | 'memo' | 'type' | 'companions' | 'rating' | 'tastingNote' | 'photoFileIds'
       >
     >,
-  ) => Promise<void>;
+  ) => Promise<CommitResult>;
   addLocation: (loc: Omit<CellarLocation, 'id'>) => Promise<void>;
   updateLocation: (id: string, patch: Partial<Omit<CellarLocation, 'id'>>) => Promise<void>;
+  reorderLocations: (orderedIds: string[]) => Promise<void>;
   deleteLocation: (id: string) => Promise<void>;
   updateTrackingSinceDate: (newDate: string, recalculateExisting: boolean) => Promise<void>;
   autoFillMissingDrinkingWindows: () => Promise<number>;
@@ -322,30 +332,99 @@ interface WineStoreState {
 }
 
 export const useWineStore = create<WineStoreState>((set, get) => {
+  let mutationRevision = 0;
+
   const persistLocalCache = async (override?: Partial<{
     data: WineDatabase | null;
     fileId: string | null;
     lastSyncedModifiedTime: string | null;
     hasUnsyncedChanges: boolean;
     storageMode: StorageMode;
-  }>) => {
+  }>): Promise<boolean> => {
     const state = get();
-    await saveCachedState({
-      data: override?.data !== undefined ? override.data : state.db,
-      fileId: override?.fileId !== undefined ? override.fileId : state.fileId,
-      lastSyncedModifiedTime:
-        override?.lastSyncedModifiedTime !== undefined
-          ? override.lastSyncedModifiedTime
-          : state.lastSyncedModifiedTime,
-      hasUnsyncedChanges:
-        override?.hasUnsyncedChanges !== undefined
-          ? override.hasUnsyncedChanges
-          : state.hasUnsyncedChanges,
-      storageMode: override?.storageMode !== undefined ? override.storageMode : state.storageMode,
-    });
+    try {
+      await saveCachedState({
+        data: override?.data !== undefined ? override.data : state.db,
+        fileId: override?.fileId !== undefined ? override.fileId : state.fileId,
+        lastSyncedModifiedTime:
+          override?.lastSyncedModifiedTime !== undefined
+            ? override.lastSyncedModifiedTime
+            : state.lastSyncedModifiedTime,
+        hasUnsyncedChanges:
+          override?.hasUnsyncedChanges !== undefined
+            ? override.hasUnsyncedChanges
+            : state.hasUnsyncedChanges,
+        storageMode: override?.storageMode !== undefined ? override.storageMode : state.storageMode,
+      });
+      return true;
+    } catch (err) {
+      console.warn('[JH Wine Forest] IndexedDB 로컬 캐시 저장 실패:', err);
+      return false;
+    }
   };
 
-  const cleanupUnreferencedPhotoFiles = (candidateIds: Iterable<string>, nextDb: WineDatabase) => {
+  const syncNativeAuthStateIfNeeded = () => {
+    if (get().storageMode === 'google_drive' && isNativeAuth() && !get().googleConnected) {
+      set({
+        googleConnected: true,
+        authUserEmail: getAuthUserEmail(),
+        authRevision: get().authRevision + 1,
+      });
+    }
+  };
+
+  const migrateLocalPhotosToDrive = async (sourceDb: WineDatabase): Promise<WineDatabase> => {
+    const localIds = new Set<string>();
+    for (const w of sourceDb.wines) {
+      if (w.labelImageFileId?.startsWith('local_photo_')) {
+        localIds.add(w.labelImageFileId);
+      }
+    }
+    for (const t of sourceDb.tastings) {
+      for (const pid of t.photoFileIds ?? []) {
+        if (pid.startsWith('local_photo_')) {
+          localIds.add(pid);
+        }
+      }
+    }
+    if (localIds.size === 0) return sourceDb;
+
+    const idMapping = new Map<string, string>();
+    for (const oldId of localIds) {
+      try {
+        const blob = await getCachedPhoto(oldId);
+        if (!blob) continue;
+        const ext = blob.type.includes('webp') ? 'webp' : blob.type.includes('png') ? 'png' : 'jpg';
+        const { fileId } = await googleDriveAdapter.uploadPhoto(blob, `migrated_${oldId}.${ext}`);
+        await registerUploadedPhotoBlob(fileId, blob);
+        idMapping.set(oldId, fileId);
+      } catch (err) {
+        if (err instanceof AuthRequiredError) throw err;
+        // 개별 로컬 사진 이관 실패 시 나머지 이관 계속 진행
+      }
+    }
+    if (idMapping.size === 0) return sourceDb;
+
+    return {
+      ...sourceDb,
+      wines: sourceDb.wines.map((w) =>
+        w.labelImageFileId && idMapping.has(w.labelImageFileId)
+          ? { ...w, labelImageFileId: idMapping.get(w.labelImageFileId)! }
+          : w,
+      ),
+      tastings: sourceDb.tastings.map((t) =>
+        t.photoFileIds
+          ? { ...t, photoFileIds: t.photoFileIds.map((pid) => idMapping.get(pid) ?? pid) }
+          : t,
+      ),
+    };
+  };
+
+  const cleanupUnreferencedPhotoFiles = (
+    candidateIds: Iterable<string>,
+    nextDb: WineDatabase,
+    allowRemoteDelete = true,
+  ) => {
     const uniqueCandidates = new Set<string>();
     for (const id of candidateIds) {
       if (id) uniqueCandidates.add(id);
@@ -366,7 +445,10 @@ export const useWineStore = create<WineStoreState>((set, get) => {
     const adapter = getAdapter(mode);
     for (const fileId of uniqueCandidates) {
       if (!referenced.has(fileId)) {
-        if (mode === 'local_test' || isTokenValid() || (isNativeAuth() && get().googleConnected)) {
+        if (
+          allowRemoteDelete &&
+          (mode === 'local_test' || isTokenValid() || (isNativeAuth() && get().googleConnected))
+        ) {
           void adapter.deletePhoto(fileId).catch(() => undefined);
         }
         void evictPhotoFromCache(fileId);
@@ -374,10 +456,13 @@ export const useWineStore = create<WineStoreState>((set, get) => {
     }
   };
 
-  const commitMutation = async (nextDb: WineDatabase, successToast?: string) => {
+  const commitMutation = async (
+    nextDb: WineDatabase,
+    successToast?: string,
+  ): Promise<CommitResult> => {
     const state = get();
     const nowIso = new Date().toISOString();
-    const updatedDb: WineDatabase = {
+    const candidateDb: WineDatabase = {
       ...nextDb,
       metadata: {
         ...nextDb.metadata,
@@ -386,53 +471,116 @@ export const useWineStore = create<WineStoreState>((set, get) => {
       },
     };
 
+    // 0. Zustand·IndexedDB 반영 전 반드시 Zod 스키마 검증 (손상 캐시 영구 오염 방지)
+    let updatedDb: WineDatabase;
+    try {
+      updatedDb = parseWineDatabase(candidateDb);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : '입력값이 데이터 스키마 규칙에 맞지 않습니다.';
+      get().showToast(`저장할 수 없습니다: ${msg}`, 'error');
+      return 'invalid';
+    }
+
+    mutationRevision += 1;
+
     // 1. 낙관적 UI + IndexedDB 영속화 (hasUnsyncedChanges = true로 보호)
     set({
       db: updatedDb,
       hasUnsyncedChanges: true,
       syncError: null,
     });
-    await persistLocalCache({ data: updatedDb, hasUnsyncedChanges: true });
+    const localSavedBeforeSync = await persistLocalCache({
+      data: updatedDb,
+      hasUnsyncedChanges: true,
+    });
 
     // 2. Google Drive 모드(웹 GIS)인데 토큰이 만료/없음 -> 비동기 팝업 호출 금지(R2 보강)!
     //    안전하게 로컬 보관 후 1클릭 재인증 배지/토스트로 유도 (네이티브 앱은 saveWithPolicy 내부에서 무음 갱신 시도)
     if (state.storageMode === 'google_drive' && !isNativeAuth() && !isTokenValid()) {
       set({ syncStatus: 'auth_required' });
       get().showToast(
-        '변경사항이 기기에 안전 저장되었습니다. 상단 [재인증]을 눌러 Google Drive에 동기화하세요.',
+        localSavedBeforeSync
+          ? '변경사항이 기기에 안전 저장되었습니다. 상단 [재인증]을 눌러 Google Drive에 동기화하세요.'
+          : '인증이 만료되었고 로컬 캐시 저장에도 실패했습니다. 상단 [재인증]으로 즉시 동기화해 주세요.',
         'warning',
       );
-      return;
+      return 'queued_local';
     }
 
-    // 3. 저장소 동기화 실행 (SyncEngine Write Mutex)
+    // 3. 저장소 동기화 실행 (SyncEngine Write Mutex 내부에서 최신 상태 스냅샷)
     set({ syncStatus: 'syncing' });
-    try {
-      const adapter = getAdapter(state.storageMode);
-      const latestState = get();
-      const result = await syncEngine.saveWithPolicy(adapter, {
-        fileId: latestState.fileId,
-        data: latestState.db ?? updatedDb,
-        expectedModifiedTime: latestState.lastSyncedModifiedTime,
+    const modeAtCall = state.storageMode;
+    const adapter = getAdapter(modeAtCall);
+    let flushRev = mutationRevision;
+
+    const executeSave = async (forceRecreate = false) => {
+      return syncEngine.saveWithPolicy(adapter, () => {
+        const latest = get();
+        if (!latest.db) return null;
+        flushRev = mutationRevision;
+        return {
+          fileId: forceRecreate ? null : latest.fileId,
+          data: latest.db,
+          expectedModifiedTime: forceRecreate ? null : latest.lastSyncedModifiedTime,
+        };
       });
+    };
+
+    try {
+      let result;
+      try {
+        result = await executeSave(false);
+      } catch (err) {
+        if (err instanceof FileNotFoundError && modeAtCall === 'google_drive') {
+          // 원격 wine_db.json이 휴지통 이동/영구 삭제된 경우 fileId 초기화 후 안전 재생성
+          set({ fileId: null, lastSyncedModifiedTime: null });
+          result = await executeSave(true);
+        } else {
+          throw err;
+        }
+      }
+
+      if (get().storageMode !== modeAtCall) {
+        return 'synced';
+      }
+
+      const hasNewerLocalMutation = mutationRevision !== flushRev;
+      const currentDb = get().db;
+      const mergedDb =
+        hasNewerLocalMutation && currentDb
+          ? {
+              ...currentDb,
+              metadata: {
+                ...currentDb.metadata,
+                lastBackupAt: result.savedData.metadata.lastBackupAt ?? currentDb.metadata.lastBackupAt,
+              },
+            }
+          : result.savedData;
 
       set({
-        db: result.savedData,
+        db: mergedDb,
         fileId: result.fileId,
         lastSyncedModifiedTime: result.modifiedTime,
-        hasUnsyncedChanges: false,
-        syncStatus: 'synced',
+        hasUnsyncedChanges: hasNewerLocalMutation,
+        syncStatus: hasNewerLocalMutation ? 'syncing' : 'synced',
         conflict: null,
         syncError: null,
       });
-      await persistLocalCache({
-        data: result.savedData,
+      syncNativeAuthStateIfNeeded();
+
+      const localSavedAfterSync = await persistLocalCache({
+        data: mergedDb,
         fileId: result.fileId,
         lastSyncedModifiedTime: result.modifiedTime,
-        hasUnsyncedChanges: false,
+        hasUnsyncedChanges: hasNewerLocalMutation,
       });
 
-      if (result.autoBackupCreated) {
+      if (!localSavedAfterSync) {
+        get().showToast(
+          'Google Drive 동기화는 완료했으나 브라우저 로컬 캐시 저장 공간이 부족합니다.',
+          'warning',
+        );
+      } else if (result.autoBackupCreated) {
         get().showToast(
           `${successToast ? `${successToast} · ` : ''}주간 자동 백업 완료 (${result.autoBackupCreated.name})`,
           'success',
@@ -440,6 +588,7 @@ export const useWineStore = create<WineStoreState>((set, get) => {
       } else if (successToast) {
         get().showToast(successToast, 'success');
       }
+      return 'synced';
     } catch (err) {
       if (err instanceof ConflictError) {
         set({
@@ -450,14 +599,22 @@ export const useWineStore = create<WineStoreState>((set, get) => {
             remoteModifiedTime: err.remoteModifiedTime,
           },
         });
-      } else if (err instanceof AuthRequiredError) {
+        return 'conflict';
+      }
+      if (err instanceof AuthRequiredError) {
         set({ syncStatus: 'auth_required', syncError: err.message });
         get().showToast('인증이 만료되었습니다. 상단 배지를 눌러 1클릭 재인증 후 동기화하세요.', 'warning');
-      } else {
-        const msg = err instanceof Error ? err.message : '동기화 중 오류가 발생했습니다.';
-        set({ syncStatus: 'error', syncError: msg });
-        get().showToast(`로컬에 저장되었으나 동기화 실패: ${msg}`, 'error');
+        return 'queued_local';
       }
+      const msg = err instanceof Error ? err.message : '동기화 중 오류가 발생했습니다.';
+      set({ syncStatus: 'error', syncError: msg });
+      get().showToast(
+        localSavedBeforeSync
+          ? `로컬에 저장되었으나 동기화 실패: ${msg}`
+          : `로컬 캐시 및 동기화 모두 실패했습니다: ${msg}`,
+        'error',
+      );
+      return 'error';
     }
   };
 
@@ -524,17 +681,19 @@ export const useWineStore = create<WineStoreState>((set, get) => {
 
       set({
         db: validDb,
-        fileId: cached.fileId,
-        lastSyncedModifiedTime: cached.lastSyncedModifiedTime,
-        hasUnsyncedChanges: cached.hasUnsyncedChanges,
+        fileId: validDb ? cached.fileId : null,
+        lastSyncedModifiedTime: validDb ? cached.lastSyncedModifiedTime : null,
+        hasUnsyncedChanges: validDb ? cached.hasUnsyncedChanges : false,
         storageMode: mode,
-        syncStatus: initialSyncStatus,
+        syncStatus: validDb ? initialSyncStatus : 'offline_cache',
         isHydrated: true,
       });
 
       if (nativeMode && validDb) {
         void (async () => {
           const session = await restoreAuthSession();
+          // 비동기 세션 복원 중 사용자가 연결 해제하거나 로컬 테스트 모드로 전환한 경우 중단
+          if (get().storageMode !== 'google_drive' || !get().db) return;
           if (session) {
             set({
               googleConnected: true,
@@ -548,7 +707,7 @@ export const useWineStore = create<WineStoreState>((set, get) => {
             } else if (latest.db) {
               await get().syncNow();
             }
-          } else if (cached.hasUnsyncedChanges) {
+          } else if (get().hasUnsyncedChanges) {
             set({ syncStatus: 'auth_required' });
           }
         })();
@@ -573,7 +732,6 @@ export const useWineStore = create<WineStoreState>((set, get) => {
 
       set({
         storageMode: 'google_drive',
-        googleConnected: true,
         authUserEmail: getAuthUserEmail(),
         authRevision: get().authRevision + 1,
         syncStatus: 'syncing',
@@ -588,6 +746,7 @@ export const useWineStore = create<WineStoreState>((set, get) => {
           const loaded = await googleDriveAdapter.loadDb(found.fileId);
           set({
             db: loaded.data,
+            googleConnected: true,
             fileId: found.fileId,
             lastSyncedModifiedTime: loaded.modifiedTime,
             hasUnsyncedChanges: false,
@@ -603,11 +762,12 @@ export const useWineStore = create<WineStoreState>((set, get) => {
           get().showToast('Google Drive에서 와인 셀러를 불러왔습니다.', 'success');
           return 'loaded';
         }
-        set({ syncStatus: 'synced' });
+        set({ googleConnected: true, syncStatus: 'synced' });
         return 'needs_setup';
       } catch (err) {
         const msg = err instanceof Error ? err.message : '드라이브 연결 중 오류가 발생했습니다.';
-        set({ syncStatus: 'error', syncError: msg });
+        // Drive 조회 실패 시 googleConnected: false 유지(기존 사용자에게 빈 셀러 생성 유도 방지)
+        set({ googleConnected: false, syncStatus: 'error', syncError: msg });
         get().showToast(msg, 'error');
         return 'cancelled';
       }
@@ -647,8 +807,23 @@ export const useWineStore = create<WineStoreState>((set, get) => {
 
     switchStorageMode: async (mode) => {
       if (mode === 'local_test') {
-        set({ storageMode: 'local_test', syncStatus: 'synced', syncError: null });
-        await persistLocalCache({ storageMode: 'local_test' });
+        localOnlyAdapter.reset();
+        set({
+          storageMode: 'local_test',
+          fileId: null,
+          lastSyncedModifiedTime: null,
+          hasUnsyncedChanges: false,
+          conflict: null,
+          modeSwitchConflict: null,
+          syncStatus: 'synced',
+          syncError: null,
+        });
+        await persistLocalCache({
+          storageMode: 'local_test',
+          fileId: null,
+          lastSyncedModifiedTime: null,
+          hasUnsyncedChanges: false,
+        });
         get().showToast('로컬 테스트 모드로 전환했습니다. 변경사항은 이 브라우저에 저장됩니다.', 'info');
         return;
       }
@@ -668,8 +843,8 @@ export const useWineStore = create<WineStoreState>((set, get) => {
         const currentDb = get().db;
         const found = await googleDriveAdapter.findDbFile();
         if (found) {
-          // T5 보강: 로컬에 데이터가 있고 Drive에도 기존 파일이 있으면 사용자 확인 모달 표시
-          if (currentDb && currentDb.bottles.length > 0) {
+          // T5 보강: 로컬에 와인/병 데이터가 있고 Drive에도 기존 파일이 있으면 사용자 확인 모달 표시
+          if (currentDb && (currentDb.bottles.length > 0 || currentDb.wines.length > 0)) {
             set({
               googleConnected: true,
               modeSwitchConflict: {
@@ -699,13 +874,14 @@ export const useWineStore = create<WineStoreState>((set, get) => {
           });
           get().showToast('Google Drive 모드로 전환하고 원격 DB를 불러왔습니다.', 'success');
         } else if (currentDb) {
+          const migratedDb = await migrateLocalPhotosToDrive(currentDb);
           set({
             storageMode: 'google_drive',
             googleConnected: true,
             fileId: null,
             lastSyncedModifiedTime: null,
           });
-          await commitMutation(currentDb, '현재 데이터를 Google Drive에 최초 업로드했습니다.');
+          await commitMutation(migratedDb, '현재 데이터를 Google Drive에 최초 업로드했습니다.');
         }
       } catch (err) {
         const msg = err instanceof Error ? err.message : 'Google Drive 전환에 실패했습니다.';
@@ -719,7 +895,7 @@ export const useWineStore = create<WineStoreState>((set, get) => {
       if (!pending) return;
 
       if (choice === 'cancel') {
-        set({ modeSwitchConflict: null });
+        set({ modeSwitchConflict: null, googleConnected: false });
         get().showToast('전환을 취소하고 로컬 테스트 모드를 유지합니다.', 'info');
         return;
       }
@@ -746,20 +922,26 @@ export const useWineStore = create<WineStoreState>((set, get) => {
           });
           get().showToast('Google Drive 원격 데이터로 전환했습니다.', 'success');
         } catch (err) {
-          const msg = err instanceof Error ? err.message : '원격 데이터 로드 실패';
-          set({ syncStatus: 'error', syncError: msg });
-          get().showToast(msg, 'error');
+          if (err instanceof AuthRequiredError) {
+            set({ syncStatus: 'auth_required', syncError: err.message });
+            get().showToast('구글 재인증 후 다시 시도해 주세요.', 'warning');
+          } else {
+            const msg = err instanceof Error ? err.message : '원격 데이터 로드 실패';
+            set({ syncStatus: 'error', syncError: msg });
+            get().showToast(msg, 'error');
+          }
         }
         return;
       }
 
-      // overwrite_remote: 원격 파일을 먼저 conflict 백업으로 대피시킨 뒤 로컬 데이터 업로드
+      // overwrite_remote: 로컬 사진 이관 + 원격 파일 conflict 대피 백업 후 로컬 데이터 업로드
       if (choice === 'overwrite_remote' && state.db) {
         set({ modeSwitchConflict: null, storageMode: 'google_drive', syncStatus: 'syncing' });
         try {
+          const migratedDb = await migrateLocalPhotosToDrive(state.db);
           const result = await syncEngine.saveWithPolicy(googleDriveAdapter, {
             fileId: pending.remoteFileId,
-            data: state.db,
+            data: migratedDb,
             expectedModifiedTime: null,
             forceOverwrite: true,
           });
@@ -779,11 +961,21 @@ export const useWineStore = create<WineStoreState>((set, get) => {
             hasUnsyncedChanges: false,
             storageMode: 'google_drive',
           });
-          get().showToast('기존 Drive 파일을 대피 백업한 뒤 현재 로컬 데이터로 덮어썼습니다.', 'success');
+          get().showToast(
+            result.conflictBackupCreated === false
+              ? '현재 로컬 데이터로 덮어썼습니다. (주의: 기존 Drive 원격 대피 백업 생성은 실패했습니다)'
+              : '기존 Drive 파일을 대피 백업한 뒤 현재 로컬 데이터로 덮어썼습니다.',
+            result.conflictBackupCreated === false ? 'warning' : 'success',
+          );
         } catch (err) {
-          const msg = err instanceof Error ? err.message : 'Drive 덮어쓰기 실패';
-          set({ storageMode: 'local_test', syncStatus: 'error', syncError: msg });
-          get().showToast(msg, 'error');
+          if (err instanceof AuthRequiredError) {
+            set({ storageMode: 'local_test', syncStatus: 'auth_required', syncError: err.message });
+            get().showToast('구글 재인증 후 다시 시도해 주세요.', 'warning');
+          } else {
+            const msg = err instanceof Error ? err.message : 'Drive 덮어쓰기 실패';
+            set({ storageMode: 'local_test', syncStatus: 'error', syncError: msg });
+            get().showToast(msg, 'error');
+          }
         }
       }
     },
@@ -811,9 +1003,12 @@ export const useWineStore = create<WineStoreState>((set, get) => {
     },
 
     disconnectAndResetLocal: async () => {
+      mutationRevision += 1;
       await clearAccessToken();
       googleDriveAdapter.resetWorkspaceCache();
+      localOnlyAdapter.reset();
       await clearCachedState();
+      await clearAllLocalBackups();
       await clearAllPhotoCaches();
       set({
         db: null,
@@ -823,7 +1018,9 @@ export const useWineStore = create<WineStoreState>((set, get) => {
         googleConnected: false,
         authUserEmail: null,
         syncStatus: 'offline_cache',
+        syncError: null,
         conflict: null,
+        modeSwitchConflict: null,
         backups: [],
       });
       get().showToast('로컬 캐시와 연결을 초기화했습니다.', 'info');
@@ -837,15 +1034,33 @@ export const useWineStore = create<WineStoreState>((set, get) => {
         return;
       }
 
+      const prevEmail = state.authUserEmail;
+
       // 반드시 클릭 핸들러 동기 컨텍스트에서 requestAccessToken() 호출
       try {
         await requestAccessToken();
+        googleDriveAdapter.resetWorkspaceCache();
+        const nextEmail = getAuthUserEmail();
+        const accountSwitched = Boolean(prevEmail && nextEmail && prevEmail !== nextEmail);
+
         set({
           googleConnected: true,
-          authUserEmail: getAuthUserEmail(),
+          authUserEmail: nextEmail,
           authRevision: get().authRevision + 1,
           syncError: null,
+          ...(accountSwitched
+            ? { fileId: null, lastSyncedModifiedTime: null, hasUnsyncedChanges: false, conflict: null }
+            : {}),
         });
+
+        if (accountSwitched) {
+          get().showToast(
+            `Google 계정이 변경되어(${nextEmail}) 해당 계정의 Drive 데이터를 다시 불러옵니다.`,
+            'info',
+          );
+          await get().syncNow();
+          return;
+        }
       } catch (err) {
         const msg = err instanceof Error ? err.message : '구글 재인증에 실패했습니다.';
         get().showToast(msg, 'error');
@@ -853,6 +1068,11 @@ export const useWineStore = create<WineStoreState>((set, get) => {
       }
 
       const afterAuth = get();
+      if (afterAuth.conflict) {
+        set({ syncStatus: 'conflict' });
+        get().showToast('구글 재인증 완료. 충돌 해결 방식을 다시 선택해 주세요.', 'info');
+        return;
+      }
       if (afterAuth.hasUnsyncedChanges && afterAuth.db) {
         await commitMutation(afterAuth.db, '대기 중이던 변경사항을 Google Drive에 동기화했습니다.');
       } else {
@@ -878,20 +1098,36 @@ export const useWineStore = create<WineStoreState>((set, get) => {
         return;
       }
 
+      const startRev = mutationRevision;
       set({ syncStatus: 'syncing', syncError: null });
       try {
         const found = await googleDriveAdapter.findDbFile();
+        if (get().storageMode !== 'google_drive') return;
+
         if (!found) {
-          if (state.db) {
-            await commitMutation(state.db, 'Google Drive에 새 DB 파일을 생성했습니다.');
+          const latest = get();
+          if (latest.db) {
+            // 원격 파일이 사라진 상태이므로 죽은 fileId를 초기화하고 새로 생성
+            set({ fileId: null, lastSyncedModifiedTime: null });
+            await commitMutation(latest.db, 'Google Drive에 새 DB 파일을 생성했습니다.');
           } else {
             set({ syncStatus: 'synced' });
+            syncNativeAuthStateIfNeeded();
           }
           return;
         }
 
-        if (found.modifiedTime !== state.lastSyncedModifiedTime || !state.db) {
+        if (found.modifiedTime !== get().lastSyncedModifiedTime || !get().db) {
           const loaded = await googleDriveAdapter.loadDb(found.fileId);
+          // Pull 도중 로컬 편집·모드 전환·로그아웃이 발생했다면 원격 데이터로 덮어쓰지 않음(R3 보호)
+          const latest = get();
+          if (
+            latest.storageMode !== 'google_drive' ||
+            latest.hasUnsyncedChanges ||
+            mutationRevision !== startRev
+          ) {
+            return;
+          }
           set({
             db: loaded.data,
             fileId: found.fileId,
@@ -899,6 +1135,7 @@ export const useWineStore = create<WineStoreState>((set, get) => {
             hasUnsyncedChanges: false,
             syncStatus: 'synced',
           });
+          syncNativeAuthStateIfNeeded();
           await persistLocalCache({
             data: loaded.data,
             fileId: found.fileId,
@@ -907,12 +1144,15 @@ export const useWineStore = create<WineStoreState>((set, get) => {
           });
           get().showToast('Google Drive 최신 데이터를 반영했습니다.', 'success');
         } else {
-          set({ syncStatus: 'synced' });
+          if (mutationRevision === startRev && !get().hasUnsyncedChanges) {
+            set({ syncStatus: 'synced' });
+          }
+          syncNativeAuthStateIfNeeded();
           get().showToast('이미 최신 상태입니다.', 'info');
         }
       } catch (err) {
         if (err instanceof AuthRequiredError) {
-          set({ syncStatus: 'auth_required' });
+          set({ syncStatus: 'auth_required', syncError: err.message });
         } else {
           const msg = err instanceof Error ? err.message : '동기화 실패';
           set({ syncStatus: 'error', syncError: msg });
@@ -934,6 +1174,7 @@ export const useWineStore = create<WineStoreState>((set, get) => {
         set({ syncStatus: 'syncing' });
         try {
           const loaded = await adapter.loadDb(state.conflict.fileId);
+          mutationRevision += 1;
           set({
             db: loaded.data,
             fileId: state.conflict.fileId,
@@ -950,9 +1191,14 @@ export const useWineStore = create<WineStoreState>((set, get) => {
           });
           get().showToast('원격 최신본을 불러와 충돌을 해결했습니다.', 'success');
         } catch (err) {
-          const msg = err instanceof Error ? err.message : '원격 불러오기 실패';
-          set({ syncStatus: 'error', syncError: msg });
-          get().showToast(msg, 'error');
+          if (err instanceof AuthRequiredError) {
+            set({ syncStatus: 'auth_required', syncError: err.message });
+            get().showToast('인증이 만료되었습니다. [구글 재인증]을 먼저 진행해 주세요.', 'warning');
+          } else {
+            const msg = err instanceof Error ? err.message : '원격 불러오기 실패';
+            set({ syncStatus: 'error', syncError: msg });
+            get().showToast(msg, 'error');
+          }
         }
         return;
       }
@@ -980,11 +1226,21 @@ export const useWineStore = create<WineStoreState>((set, get) => {
             lastSyncedModifiedTime: result.modifiedTime,
             hasUnsyncedChanges: false,
           });
-          get().showToast('원격 파일을 충돌 백업으로 대피시킨 뒤 내 데이터로 덮어썼습니다.', 'success');
+          get().showToast(
+            result.conflictBackupCreated === false
+              ? '내 데이터로 덮어썼습니다. (주의: 원격 충돌 대피 백업은 실패했습니다)'
+              : '원격 파일을 충돌 백업으로 대피시킨 뒤 내 데이터로 덮어썼습니다.',
+            result.conflictBackupCreated === false ? 'warning' : 'success',
+          );
         } catch (err) {
-          const msg = err instanceof Error ? err.message : '덮어쓰기 실패';
-          set({ syncStatus: 'error', syncError: msg });
-          get().showToast(msg, 'error');
+          if (err instanceof AuthRequiredError) {
+            set({ syncStatus: 'auth_required', syncError: err.message });
+            get().showToast('인증이 만료되었습니다. [구글 재인증]을 먼저 진행해 주세요.', 'warning');
+          } else {
+            const msg = err instanceof Error ? err.message : '덮어쓰기 실패';
+            set({ syncStatus: 'error', syncError: msg });
+            get().showToast(msg, 'error');
+          }
         }
       }
     },
@@ -1020,10 +1276,12 @@ export const useWineStore = create<WineStoreState>((set, get) => {
       try {
         const fileName = `wine_db_manual_${formatBackupDateTimeStamp()}.json`;
         const snapshot = await getAdapter(state.storageMode).createBackup(state.db, fileName);
+        const latestDb = get().db;
+        if (!latestDb || get().storageMode !== state.storageMode) return;
         const updatedDb: WineDatabase = {
-          ...state.db,
+          ...latestDb,
           metadata: {
-            ...state.db.metadata,
+            ...latestDb.metadata,
             lastBackupAt: snapshot.createdTime,
           },
         };
@@ -1052,7 +1310,9 @@ export const useWineStore = create<WineStoreState>((set, get) => {
           currentData: state.db,
           backupFileId,
           fileId: state.fileId,
+          expectedModifiedTime: state.lastSyncedModifiedTime,
         });
+        mutationRevision += 1;
         set({
           db: result.savedData,
           fileId: result.fileId,
@@ -1215,16 +1475,21 @@ export const useWineStore = create<WineStoreState>((set, get) => {
             b.wineId === wineId ? { ...b, wineId: mergeTargetWineId, updatedAt: now } : b,
           );
           const inheritedLabel = targetMaster.labelImageFileId ?? sourceMaster.labelImageFileId ?? null;
-          const inheritedDwStart =
+          let inheritedDwStart =
             targetMaster.drinkingWindowStart ??
             patch.drinkingWindowStart ??
             sourceMaster.drinkingWindowStart ??
             null;
-          const inheritedDwEnd =
+          let inheritedDwEnd =
             targetMaster.drinkingWindowEnd ??
             patch.drinkingWindowEnd ??
             sourceMaster.drinkingWindowEnd ??
             null;
+          // 서로 다른 부분 음용적기 결합 시 start > end 역전 방지
+          if (inheritedDwStart != null && inheritedDwEnd != null && inheritedDwStart > inheritedDwEnd) {
+            inheritedDwStart = targetMaster.drinkingWindowStart ?? null;
+            inheritedDwEnd = targetMaster.drinkingWindowEnd ?? null;
+          }
           const inheritedProducer =
             targetMaster.producer || patch.producer?.trim() || sourceMaster.producer || undefined;
 
@@ -1243,9 +1508,9 @@ export const useWineStore = create<WineStoreState>((set, get) => {
                 : w,
             );
           const nextDb: WineDatabase = { ...db, wines: nextWines, bottles: nextBottles };
-          await commitMutation(nextDb, '기존 동일 와인과 하나로 병합했습니다.');
+          const commitRes = await commitMutation(nextDb, '기존 동일 와인과 하나로 병합했습니다.');
           if (sourceMaster.labelImageFileId && sourceMaster.labelImageFileId !== inheritedLabel) {
-            cleanupUnreferencedPhotoFiles([sourceMaster.labelImageFileId], nextDb);
+            cleanupUnreferencedPhotoFiles([sourceMaster.labelImageFileId], nextDb, commitRes === 'synced');
           }
           return;
         }
@@ -1313,7 +1578,7 @@ export const useWineStore = create<WineStoreState>((set, get) => {
         bottles: nextBottles,
         tastings: nextTastings,
       };
-      await commitMutation(nextDb, '병 기록을 삭제했습니다.');
+      const commitRes = await commitMutation(nextDb, '병 기록을 삭제했습니다.');
 
       const candidatePhotoIds: string[] = [];
       for (const t of removedTastings) {
@@ -1322,7 +1587,7 @@ export const useWineStore = create<WineStoreState>((set, get) => {
       if (removedMaster?.labelImageFileId) {
         candidatePhotoIds.push(removedMaster.labelImageFileId);
       }
-      cleanupUnreferencedPhotoFiles(candidatePhotoIds, nextDb);
+      cleanupUnreferencedPhotoFiles(candidatePhotoIds, nextDb, commitRes === 'synced');
     },
 
     moveBottle: async (bottleId, targetLocationId) => {
@@ -1350,6 +1615,10 @@ export const useWineStore = create<WineStoreState>((set, get) => {
     }) => {
       const db = get().db;
       if (!db) return;
+      if (!db.bottles.some((b) => b.id === bottleId)) {
+        get().showToast('대상 병 기록을 찾을 수 없습니다.', 'warning');
+        return;
+      }
       const now = new Date().toISOString();
       const nextBottles = db.bottles.map((b) =>
         b.id === bottleId
@@ -1406,17 +1675,17 @@ export const useWineStore = create<WineStoreState>((set, get) => {
         bottles: nextBottles,
         tastings: nextTastings,
       };
-      await commitMutation(nextDb, '보유 상태로 복원했습니다.');
+      const commitRes = await commitMutation(nextDb, '보유 상태로 복원했습니다.');
 
       const candidatePhotoIds = removedTastings.flatMap((t) => t.photoFileIds ?? []);
-      cleanupUnreferencedPhotoFiles(candidatePhotoIds, nextDb);
+      cleanupUnreferencedPhotoFiles(candidatePhotoIds, nextDb, commitRes === 'synced');
     },
 
     updateTastingRecord: async (tastingId, patch) => {
       const db = get().db;
-      if (!db) return;
+      if (!db) return 'invalid';
       const target = db.tastings.find((t) => t.id === tastingId);
-      if (!target) return;
+      if (!target) return 'invalid';
       const nextTastings = db.tastings.map((t) =>
         t.id === tastingId
           ? {
@@ -1445,7 +1714,7 @@ export const useWineStore = create<WineStoreState>((set, get) => {
             )
           : db.bottles;
 
-      await commitMutation(
+      return commitMutation(
         { ...db, bottles: nextBottles, tastings: nextTastings },
         '소비·선물 이력을 수정했습니다.',
       );
@@ -1454,12 +1723,21 @@ export const useWineStore = create<WineStoreState>((set, get) => {
     addLocation: async (loc) => {
       const db = get().db;
       if (!db) return;
+      const zone = loc.zone.trim();
+      const shelf = loc.shelf.trim();
+      const displayName = loc.displayName.trim();
+      if (!zone || !shelf || !displayName) {
+        get().showToast('구역, 선반명, 표시 이름은 비워둘 수 없습니다.', 'warning');
+        return;
+      }
       const newLoc: CellarLocation = {
         ...loc,
         id: `loc_${generateId().slice(0, 8)}`,
-        zone: loc.zone.trim(),
-        shelf: loc.shelf.trim(),
-        displayName: loc.displayName.trim(),
+        zone,
+        shelf,
+        displayName,
+        maxCapacity: Math.max(0, Math.round(loc.maxCapacity)),
+        sortOrder: Math.round(loc.sortOrder),
       };
       await commitMutation(
         { ...db, locations: [...db.locations, newLoc] },
@@ -1470,8 +1748,35 @@ export const useWineStore = create<WineStoreState>((set, get) => {
     updateLocation: async (id, patch) => {
       const db = get().db;
       if (!db) return;
-      const nextLocations = db.locations.map((l) => (l.id === id ? { ...l, ...patch } : l));
+      const sanitized: Partial<Omit<CellarLocation, 'id'>> = {
+        ...patch,
+        ...(patch.zone !== undefined ? { zone: patch.zone.trim() } : {}),
+        ...(patch.shelf !== undefined ? { shelf: patch.shelf.trim() } : {}),
+        ...(patch.displayName !== undefined ? { displayName: patch.displayName.trim() } : {}),
+        ...(patch.maxCapacity !== undefined
+          ? { maxCapacity: Math.max(0, Math.round(patch.maxCapacity)) }
+          : {}),
+        ...(patch.sortOrder !== undefined ? { sortOrder: Math.round(patch.sortOrder) } : {}),
+      };
+      const nextLocations = db.locations.map((l) => (l.id === id ? { ...l, ...sanitized } : l));
       await commitMutation({ ...db, locations: nextLocations }, '선반 정보를 수정했습니다.');
+    },
+
+    reorderLocations: async (orderedIds) => {
+      const db = get().db;
+      if (!db) return;
+      const orderIndex = new Map(orderedIds.map((id, idx) => [id, idx + 1]));
+      let nextExtra = orderedIds.length + 1;
+      const nextLocations = db.locations.map((loc) => {
+        const assigned = orderIndex.get(loc.id);
+        if (assigned !== undefined) {
+          return { ...loc, sortOrder: assigned };
+        }
+        const fallback = nextExtra;
+        nextExtra += 1;
+        return { ...loc, sortOrder: fallback };
+      });
+      await commitMutation({ ...db, locations: nextLocations }, '선반 순서를 변경했습니다.');
     },
 
     deleteLocation: async (id) => {
@@ -1502,10 +1807,15 @@ export const useWineStore = create<WineStoreState>((set, get) => {
     updateTrackingSinceDate: async (newDate, recalculateExisting) => {
       const db = get().db;
       if (!db) return;
+      const trimmed = newDate.trim();
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) {
+        get().showToast('유효한 기준일(YYYY-MM-DD)을 입력해 주세요.', 'warning');
+        return;
+      }
       const nextBottles = recalculateExisting
         ? db.bottles.map((b) => ({
             ...b,
-            includeInTrackingSince: shouldIncludeInTrackingSince(b.purchaseDate, newDate),
+            includeInTrackingSince: shouldIncludeInTrackingSince(b.purchaseDate, trimmed),
           }))
         : db.bottles;
 
@@ -1514,13 +1824,13 @@ export const useWineStore = create<WineStoreState>((set, get) => {
           ...db,
           metadata: {
             ...db.metadata,
-            trackingSinceDate: newDate,
+            trackingSinceDate: trimmed,
           },
           bottles: nextBottles,
         },
         recalculateExisting
-          ? `누적 지출 기준일을 ${newDate}로 변경하고 전체 병을 재계산했습니다.`
-          : `누적 지출 기준일을 ${newDate}로 변경했습니다.`,
+          ? `누적 지출 기준일을 ${trimmed}로 변경하고 전체 병을 재계산했습니다.`
+          : `누적 지출 기준일을 ${trimmed}로 변경했습니다.`,
       );
     },
 
@@ -1597,12 +1907,21 @@ export const useWineStore = create<WineStoreState>((set, get) => {
         const { fileId } = await adapter.uploadPhoto(processed.blob, fileName);
         await registerUploadedPhotoBlob(fileId, processed.blob);
 
+        // 비동기 업로드 후 최신 db 재조회(업로드 도중 발생한 타 편집 덮어쓰기 방지)
+        const latestDb = get().db;
+        if (!latestDb || get().storageMode !== state.storageMode) {
+          void adapter.deletePhoto(fileId).catch(() => undefined);
+          void evictPhotoFromCache(fileId);
+          return;
+        }
+        const latestWine = latestDb.wines.find((w) => w.id === wineId) ?? wine;
+
         // 빈티지 구분 없이 동일 (와인명, 색상) 전체 빈티지에 라벨 1장을 공통 적용
-        const targetGroupKey = buildWineLabelGroupKey(wine);
+        const targetGroupKey = buildWineLabelGroupKey(latestWine);
         const oldFileIds = new Set<string>();
         let sharedCount = 0;
         const now = new Date().toISOString();
-        const nextWines = db.wines.map((w) => {
+        const nextWines = latestDb.wines.map((w) => {
           if (buildWineLabelGroupKey(w) === targetGroupKey) {
             if (w.labelImageFileId && w.labelImageFileId !== fileId) {
               oldFileIds.add(w.labelImageFileId);
@@ -1613,22 +1932,14 @@ export const useWineStore = create<WineStoreState>((set, get) => {
           return w;
         });
 
-        await commitMutation(
-          { ...db, wines: nextWines },
+        const nextDb: WineDatabase = { ...latestDb, wines: nextWines };
+        const commitRes = await commitMutation(
+          nextDb,
           sharedCount > 1
             ? `라벨 사진을 등록해 동일 와인 ${sharedCount}개 빈티지에 공통 적용했습니다.`
             : '와인 라벨 사진을 등록했습니다.',
         );
-
-        const stillReferenced = new Set(
-          nextWines.map((w) => w.labelImageFileId).filter((id): id is string => Boolean(id)),
-        );
-        for (const oldId of oldFileIds) {
-          if (!stillReferenced.has(oldId)) {
-            void adapter.deletePhoto(oldId).catch(() => undefined);
-            void evictPhotoFromCache(oldId);
-          }
-        }
+        cleanupUnreferencedPhotoFiles(oldFileIds, nextDb, commitRes === 'synced');
       } catch (err) {
         if (err instanceof AuthRequiredError) {
           set({ syncStatus: 'auth_required', syncError: err.message });
@@ -1657,24 +1968,9 @@ export const useWineStore = create<WineStoreState>((set, get) => {
         }
         return w;
       });
-      await commitMutation({ ...db, wines: nextWines }, '라벨 사진을 삭제했습니다.');
-
-      const stillReferenced = new Set(
-        nextWines.map((w) => w.labelImageFileId).filter((id): id is string => Boolean(id)),
-      );
-      const adapter = getAdapter(state.storageMode);
-      for (const oldFileId of removedFileIds) {
-        if (!stillReferenced.has(oldFileId)) {
-          if (
-            state.storageMode === 'local_test' ||
-            isTokenValid() ||
-            (isNativeAuth() && state.googleConnected)
-          ) {
-            void adapter.deletePhoto(oldFileId).catch(() => undefined);
-          }
-          void evictPhotoFromCache(oldFileId);
-        }
-      }
+      const nextDb: WineDatabase = { ...db, wines: nextWines };
+      const commitRes = await commitMutation(nextDb, '라벨 사진을 삭제했습니다.');
+      cleanupUnreferencedPhotoFiles(removedFileIds, nextDb, commitRes === 'synced');
     },
 
     uploadTastingPhoto: async (file) => {
@@ -1796,13 +2092,16 @@ export const useWineStore = create<WineStoreState>((set, get) => {
           }
 
           const matchedList = [...matchedWines.values()];
-          const existingGroupLabelId = matchedList.find((w) => Boolean(w.labelImageFileId))?.labelImageFileId;
+          const existingGroupLabelId = matchedList
+            .map((w) => uploadedByWineId.get(w.id) ?? propagatedByWineId.get(w.id) ?? w.labelImageFileId)
+            .find((id): id is string => Boolean(id));
 
-          // 부분 라벨 그룹 정합성 보강: overwriteExisting=false인데 그룹 내 기존 라벨이 이미 있으면
-          // 새 중복 파일을 올리지 않고 기존 라벨을 비어있는 형제 빈티지에 공유(동기화)하여 1라벨 원칙 유지
+          // 부분 라벨 그룹 정합성 및 번들 내 동일 그룹 중복 항목 방지:
+          // overwriteExisting=false인데 그룹 내 기존(또는 이번 배치 선행) 라벨이 이미 있으면
+          // 새 중복 파일을 올리지 않고 기존 라벨을 비어있는 형제 빈티지에 공유
           if (!overwriteExisting && existingGroupLabelId) {
             for (const w of matchedList) {
-              if (!w.labelImageFileId) {
+              if (!w.labelImageFileId && !uploadedByWineId.has(w.id)) {
                 propagatedByWineId.set(w.id, existingGroupLabelId);
               }
             }
@@ -1818,6 +2117,10 @@ export const useWineStore = create<WineStoreState>((set, get) => {
             const { fileId } = await adapter.uploadPhoto(blob, fileName);
             await registerUploadedPhotoBlob(fileId, blob);
             for (const targetWine of targetsToUpdate) {
+              const prevUploaded = uploadedByWineId.get(targetWine.id);
+              if (prevUploaded && prevUploaded !== fileId) {
+                oldFileIdsToDelete.add(prevUploaded);
+              }
               if (targetWine.labelImageFileId && targetWine.labelImageFileId !== fileId) {
                 oldFileIdsToDelete.add(targetWine.labelImageFileId);
               }
@@ -1860,8 +2163,11 @@ export const useWineStore = create<WineStoreState>((set, get) => {
                     (skipped > 0 ? ` (기존/미일치 ${skipped}건 건너뜀)` : '') +
                     (failed > 0 ? ` (실패 ${failed}건)` : '')
                   : `기존 그룹 라벨을 미등록 빈티지 ${propagatedByWineId.size}건에 공유 반영했습니다. (신규 업로드 없음)`;
-          await commitMutation(nextDb, summaryMsg);
-          cleanupUnreferencedPhotoFiles(oldFileIdsToDelete, nextDb);
+          const commitRes = await commitMutation(nextDb, abortReason ? undefined : summaryMsg);
+          if (abortReason) {
+            get().showToast(summaryMsg, 'warning');
+          }
+          cleanupUnreferencedPhotoFiles(oldFileIdsToDelete, nextDb, commitRes === 'synced');
         } else if (abortReason === 'auth') {
           get().showToast(
             '업로드 중 구글 인증이 만료되어 중단했습니다. 상단 [구글 재인증] 후 다시 시도해 주세요.',

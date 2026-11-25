@@ -19,7 +19,17 @@ export default defineConfig(({ mode }) => {
     plugins: [
       react(),
       ...(isCapacitorBuild
-        ? []
+        ? [
+            {
+              name: 'strip-web-gis-script-for-capacitor',
+              transformIndexHtml(html: string) {
+                return html.replace(
+                  /\s*<script[^>]*accounts\.google\.com\/gsi\/client[^>]*><\/script>\s*/gi,
+                  '\n',
+                );
+              },
+            },
+          ]
         : [
             VitePWA({
               registerType: 'autoUpdate',

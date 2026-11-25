@@ -25,6 +25,7 @@ vi.mock('@/services/storage/localCache', () => ({
   saveLocalBackup: vi.fn(async () => undefined),
   listLocalBackups: vi.fn(async () => []),
   loadLocalBackup: vi.fn(async () => null),
+  clearAllLocalBackups: vi.fn(async () => undefined),
   getCachedPhoto: vi.fn(async () => null),
   putCachedPhoto: vi.fn(async () => undefined),
   deleteCachedPhoto: vi.fn(async () => undefined),
@@ -35,6 +36,7 @@ import { useWineStore } from '@/store/useWineStore';
 import { HistoryCard } from '@/components/history/HistoryCard';
 import { QuickConsumeModal } from '@/components/wines/QuickConsumeModal';
 import { StarRatingBadge } from '@/components/common/StarRating';
+import { WineThumbnail } from '@/components/common/WineThumbnail';
 
 describe('Phase 2-1 — Drinking Window Logic & Stats', () => {
   it('classifies drinking window status accurately across boundary years', () => {
@@ -493,7 +495,7 @@ describe('Code Review Regression Fixes — Estimator, HistoryCard Edit, & Reauth
 
   it('defers existing photo deletion until save and resets draft on cancel in HistoryCard', async () => {
     const deletePhotoMock = vi.fn(async () => undefined);
-    const updateTastingMock = vi.fn(async () => undefined);
+    const updateTastingMock = vi.fn(async () => 'synced' as const);
 
     const origDelete = useWineStore.getState().deleteTastingPhotoFile;
     const origUpdate = useWineStore.getState().updateTastingRecord;
@@ -794,5 +796,25 @@ describe('Medium Code Review Fixes — Orphans, Modal Preservation, Bulk Labels 
 
     rerender(<StarRatingBadge rating={92} />);
     expect(screen.getByText('92점')).toBeInTheDocument();
+  });
+
+  it('bounds WineThumbnail md size with valid Tailwind v3 explicit width/height so wide label photos never overflow', () => {
+    const { container } = render(
+      <WineThumbnail
+        color="R"
+        vintage="2020"
+        labelImageFileId="https://example.com/wide-label.webp"
+        size="md"
+      />,
+    );
+    const box = container.firstElementChild as HTMLElement;
+    expect(box.className).toContain('w-[52px]');
+    expect(box.className).toContain('h-[74px]');
+    expect(box.className).not.toContain('w-13');
+    expect(box.className).toContain('overflow-hidden');
+
+    const img = screen.getByAltText('와인 라벨');
+    expect(img.className).toContain('object-cover');
+    expect(img.className).toContain('max-w-full');
   });
 });

@@ -22,13 +22,13 @@ export function ShelfCard({
   const barBase = Math.max(location.maxCapacity, totalCount, 1);
 
   const badgeClass = isOverflow
-    ? 'bg-[var(--status-danger)]/15 text-[var(--status-danger)] border-[var(--status-danger)]/40'
+    ? 'bg-status-danger/15 text-status-danger border-status-danger/40'
     : isFull
       ? 'bg-elevated text-secondary border-subtle'
-      : 'bg-[var(--status-ok)]/12 text-[var(--status-ok)] border-[var(--status-ok)]/30';
+      : 'bg-status-ok/[0.12] text-status-ok border-status-ok/30';
 
   const badgeLabel = isOverflow
-    ? `초과 ${remain}`
+    ? `초과 +${Math.abs(remain)}`
     : isFull
       ? '만석'
       : `여유 +${remain}`;
@@ -41,7 +41,7 @@ export function ShelfCard({
         onClick={() => onSelect(location)}
         className={`group flex w-full items-center gap-3 rounded-xl border bg-surface px-3 py-2.5 text-left transition-all hover:border-forest/55 hover:shadow-card ${
           isOverflow
-            ? 'border-[var(--status-danger)]/45 bg-[var(--status-danger)]/[0.03]'
+            ? 'border-status-danger/45 bg-status-danger/[0.03]'
             : 'border-subtle'
         }`}
       >
@@ -114,7 +114,7 @@ export function ShelfCard({
       type="button"
       onClick={() => onSelect(location)}
       className={`group flex w-full flex-col gap-2.5 rounded-2xl border bg-surface p-3.5 text-left shadow-card transition-all hover:border-forest/45 hover:shadow-card-hover ${
-        isOverflow ? 'border-[var(--status-danger)]/40' : 'border-subtle'
+        isOverflow ? 'border-status-danger/40' : 'border-subtle'
       }`}
     >
       <div className="flex items-start justify-between gap-2">

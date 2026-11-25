@@ -13,13 +13,22 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         window?.makeKeyAndVisible()
 
         SceneDelegateProxy.shared.scene(scene, willConnectTo: session, options: connectionOptions)
+
+        for ctx in connectionOptions.urlContexts {
+            _ = GIDSignIn.sharedInstance.handle(ctx.url)
+        }
     }
 
     func scene(_ scene: UIScene, openURLContexts URLContexts: Set<UIOpenURLContext>) {
-        if let url = URLContexts.first?.url, GIDSignIn.sharedInstance.handle(url) {
-            return
+        var unhandled = Set<UIOpenURLContext>()
+        for ctx in URLContexts {
+            if !GIDSignIn.sharedInstance.handle(ctx.url) {
+                unhandled.insert(ctx)
+            }
         }
-        SceneDelegateProxy.shared.scene(scene, openURLContexts: URLContexts)
+        if !unhandled.isEmpty {
+            SceneDelegateProxy.shared.scene(scene, openURLContexts: unhandled)
+        }
     }
 
     func scene(_ scene: UIScene, continue userActivity: NSUserActivity) {

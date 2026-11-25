@@ -1,4 +1,5 @@
 import { Capacitor } from '@capacitor/core';
+import { useWineStore } from '@/store/useWineStore';
 import type { PhotoPreset } from './imageProcessor';
 
 export type PhotoPickSource = 'prompt' | 'camera' | 'photos';
@@ -33,12 +34,25 @@ export async function pickImageFile(options: PickImageOptions = {}): Promise<Blo
         quality: 80,
         width: options.preset === 'label' ? 1000 : 1600,
         correctOrientation: true,
+        promptLabelHeader: '사진 선택',
+        promptLabelPhoto: '앨범에서 선택',
+        promptLabelPicture: '카메라로 촬영',
+        promptLabelCancel: '취소',
       });
       if (!photo.webPath) return null;
       const res = await fetch(photo.webPath);
       if (!res.ok) return null;
       return await res.blob();
-    } catch {
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err ?? '');
+      // 사용자 취소만 조용히 null 반환, 권한 거부·설정 누락 등은 토스트로 명확히 안내
+      if (/cancel/i.test(msg)) {
+        return null;
+      }
+      const friendly = /denied|permission/i.test(msg)
+        ? '카메라 또는 사진 라이브러리 접근 권한이 거부되었습니다. 기기 설정에서 권한을 허용해 주세요.'
+        : `사진을 불러오지 못했습니다: ${msg || '알 수 없는 오류'}`;
+      useWineStore.getState().showToast(friendly, 'error');
       return null;
     }
   }
@@ -59,9 +73,17 @@ export async function pickImageFile(options: PickImageOptions = {}): Promise<Blo
     input.style.opacity = '0';
 
     let settled = false;
+    let focusTimerId: number | null = null;
+    const supportsNativeCancel =
+      'oncancel' in (input as unknown as Record<string, unknown>);
+
     const cleanup = (result: Blob | null) => {
       if (settled) return;
       settled = true;
+      if (focusTimerId !== null) {
+        window.clearTimeout(focusTimerId);
+        focusTimerId = null;
+      }
       window.removeEventListener('focus', handleWindowFocus);
       input.remove();
       resolve(result);
@@ -76,18 +98,22 @@ export async function pickImageFile(options: PickImageOptions = {}): Promise<Blo
       cleanup(null);
     };
 
-    // 일부 구형 브라우저(iOS Safari iCloud 변환 포함)는 cancel 이벤트가 지연/미발생하므로 focus 복귀 후 1초 대기
+    // cancel 이벤트 미지원 구형 브라우저에서만 focus 복귀 후 3초 대기(iOS Safari iCloud/HEIC 변환 시간 확보)
     const handleWindowFocus = () => {
-      window.setTimeout(() => {
+      if (supportsNativeCancel) return;
+      if (focusTimerId !== null) window.clearTimeout(focusTimerId);
+      focusTimerId = window.setTimeout(() => {
         if (!settled && (!input.files || input.files.length === 0)) {
           cleanup(null);
         }
-      }, 1000);
+      }, 3000);
     };
 
     input.addEventListener('change', handleChange, { once: true });
     input.addEventListener('cancel', handleCancel, { once: true });
-    window.addEventListener('focus', handleWindowFocus, { once: true });
+    if (!supportsNativeCancel) {
+      window.addEventListener('focus', handleWindowFocus, { once: true });
+    }
 
     document.body.appendChild(input);
     input.click();

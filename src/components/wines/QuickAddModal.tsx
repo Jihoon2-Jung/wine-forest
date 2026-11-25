@@ -65,6 +65,22 @@ export function QuickAddModal() {
   const [dwStartStr, setDwStartStr] = useState('');
   const [dwEndStr, setDwEndStr] = useState('');
   const [dwManualOverride, setDwManualOverride] = useState(false);
+  const dwManualOverrideRef = useRef(false);
+  const setDwOverride = (val: boolean) => {
+    dwManualOverrideRef.current = val;
+    setDwManualOverride(val);
+  };
+  const blurTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const focusTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const hintTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (blurTimerRef.current) clearTimeout(blurTimerRef.current);
+      if (focusTimerRef.current) clearTimeout(focusTimerRef.current);
+      if (hintTimerRef.current) clearTimeout(hintTimerRef.current);
+    };
+  }, []);
   const [includeTracking, setIncludeTracking] = useState(true);
   const [trackingManualOverride, setTrackingManualOverride] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -178,7 +194,7 @@ export function QuickAddModal() {
           found.drinkingWindowStart != null || found.drinkingWindowEnd != null;
         setDwStartStr(found.drinkingWindowStart ? String(found.drinkingWindowStart) : '');
         setDwEndStr(found.drinkingWindowEnd ? String(found.drinkingWindowEnd) : '');
-        setDwManualOverride(hasExistingDw);
+        setDwOverride(hasExistingDw);
         return;
       }
     }
@@ -193,7 +209,7 @@ export function QuickAddModal() {
     setProducer('');
     setDwStartStr('');
     setDwEndStr('');
-    setDwManualOverride(false);
+    setDwOverride(false);
   }, [isOpen, presetWineId]);
 
   const dwReferenceYear = /^\d{4}/.test(purchaseDate)
@@ -214,9 +230,9 @@ export function QuickAddModal() {
     [name, country, region, subRegion, color, vintage, dwReferenceYear],
   );
 
-  // 신규 입력 시 지역·등급·색상·빈티지 기반 시음적기 자동 입력 (사용자 수동 수정 전까지 자동 갱신)
+  // 신규 입력 시 지역·등급·색상·빈티지 기반 시음적기 자동 입력 (사용자 수동 수정 및 프리셋 커스텀 적기 보호)
   useEffect(() => {
-    if (!isOpen || dwManualOverride) return;
+    if (!isOpen || dwManualOverride || dwManualOverrideRef.current) return;
     if (dwEstimate) {
       setDwStartStr(String(dwEstimate.start));
       setDwEndStr(String(dwEstimate.end));
@@ -245,15 +261,17 @@ export function QuickAddModal() {
     const hasExistingDw = w.drinkingWindowStart != null || w.drinkingWindowEnd != null;
     setDwStartStr(w.drinkingWindowStart ? String(w.drinkingWindowStart) : '');
     setDwEndStr(w.drinkingWindowEnd ? String(w.drinkingWindowEnd) : '');
-    setDwManualOverride(hasExistingDw);
+    setDwOverride(hasExistingDw);
     setShowSuggestions(false);
     // T4 보강: 자동완성 후 빈티지 오입력 방지를 위해 하이라이트 및 포커스·선택
     setVintageHintActive(true);
-    setTimeout(() => {
+    if (focusTimerRef.current) clearTimeout(focusTimerRef.current);
+    if (hintTimerRef.current) clearTimeout(hintTimerRef.current);
+    focusTimerRef.current = setTimeout(() => {
       vintageInputRef.current?.focus();
       vintageInputRef.current?.select();
     }, 30);
-    setTimeout(() => setVintageHintActive(false), 3500);
+    hintTimerRef.current = setTimeout(() => setVintageHintActive(false), 3500);
   };
 
   const addQuickPrice = (delta: number) => {
@@ -263,6 +281,7 @@ export function QuickAddModal() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (submitting) return;
     setErrorMsg(null);
 
     const trimmedName = name.trim();
@@ -279,6 +298,10 @@ export function QuickAddModal() {
       setErrorMsg('국가를 입력해 주세요.');
       return;
     }
+    const safeBottleSizeMl =
+      Number.isInteger(bottleSizeMl) && bottleSizeMl >= 50 && bottleSizeMl <= 18000
+        ? bottleSizeMl
+        : 750;
 
     const numericPrice = Number(priceStr.replace(/[^0-9]/g, '')) || 0;
     const parsedDwStart = /^\d{4}$/.test(dwStartStr.trim()) ? Number(dwStartStr.trim()) : null;
@@ -297,7 +320,7 @@ export function QuickAddModal() {
         subRegion: subRegion.trim() || undefined,
         color,
         vintage: cleanVintage,
-        bottleSizeMl,
+        bottleSizeMl: safeBottleSizeMl,
         quantity,
         purchasePrice: numericPrice,
         locationId: locationId || null,
@@ -333,7 +356,7 @@ export function QuickAddModal() {
     >
       <form onSubmit={(e) => void handleSubmit(e)} className="space-y-4">
         {errorMsg && (
-          <div className="rounded-xl border border-[var(--status-danger)]/40 bg-[var(--status-danger)]/10 px-3.5 py-2.5 text-xs font-semibold text-[var(--status-danger)]">
+          <div className="rounded-xl border border-status-danger/40 bg-status-danger/10 px-3.5 py-2.5 text-xs font-semibold text-status-danger">
             {errorMsg}
           </div>
         )}
@@ -351,8 +374,14 @@ export function QuickAddModal() {
               setName(e.target.value);
               setShowSuggestions(true);
             }}
-            onFocus={() => setShowSuggestions(true)}
-            onBlur={() => setTimeout(() => setShowSuggestions(false), 180)}
+            onFocus={() => {
+              if (blurTimerRef.current) clearTimeout(blurTimerRef.current);
+              setShowSuggestions(true);
+            }}
+            onBlur={() => {
+              if (blurTimerRef.current) clearTimeout(blurTimerRef.current);
+              blurTimerRef.current = setTimeout(() => setShowSuggestions(false), 180);
+            }}
             placeholder="예: Domaine Leflaive Bourgogne Blanc"
             autoComplete="off"
             className="w-full rounded-xl border border-subtle bg-elevated px-3.5 py-2.5 text-sm font-medium text-primary focus:border-forest focus:outline-none"
@@ -363,7 +392,8 @@ export function QuickAddModal() {
                 <button
                   key={w.id}
                   type="button"
-                  onMouseDown={() => applySuggestion(w)}
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={() => applySuggestion(w)}
                   className="flex w-full items-center justify-between gap-2 border-b border-subtle/60 px-3.5 py-2 text-left text-xs last:border-none hover:bg-elevated"
                 >
                   <div className="min-w-0">
@@ -483,7 +513,7 @@ export function QuickAddModal() {
 
           <div className="space-y-1.5">
             <label className="text-xs font-bold text-secondary" htmlFor="add-region">
-              지역 *
+              지역
             </label>
             <input
               id="add-region"
@@ -547,7 +577,7 @@ export function QuickAddModal() {
 
           <div className="space-y-1.5 sm:col-span-8">
             <label className="text-xs font-bold text-secondary" htmlFor="add-price">
-              병당 구매가 (원) *
+              병당 구매가 (원)
             </label>
             <input
               id="add-price"
@@ -589,7 +619,7 @@ export function QuickAddModal() {
         {/* 5. 보관 위치 */}
         <div className="space-y-1.5">
           <label className="text-xs font-bold text-secondary" htmlFor="add-location">
-            보관 위치 *
+            보관 위치
           </label>
           <select
             id="add-location"
@@ -602,7 +632,7 @@ export function QuickAddModal() {
               <optgroup key={zone} label={zone}>
                 {locs.map((loc) => (
                   <option key={loc.id} value={loc.id}>
-                    {loc.displayName} ({loc.remain >= 0 ? `여유 ${loc.remain}` : `초과 ${loc.remain}`})
+                    {loc.displayName} ({loc.remain >= 0 ? `여유 ${loc.remain}` : `초과 +${Math.abs(loc.remain)}`})
                   </option>
                 ))}
               </optgroup>
@@ -738,7 +768,7 @@ export function QuickAddModal() {
                         <button
                           type="button"
                           onClick={() => {
-                            setDwManualOverride(false);
+                            setDwOverride(false);
                             setDwStartStr(String(dwEstimate.start));
                             setDwEndStr(String(dwEstimate.end));
                           }}
@@ -760,7 +790,7 @@ export function QuickAddModal() {
                     value={dwStartStr}
                     onChange={(e) => {
                       setDwStartStr(e.target.value);
-                      setDwManualOverride(true);
+                      setDwOverride(true);
                     }}
                     placeholder="음용 적기 시작연도 (예: 2026)"
                     className="rounded-xl border border-subtle bg-surface px-3 py-2 text-xs tabular-nums text-primary focus:border-forest focus:outline-none"
@@ -772,7 +802,7 @@ export function QuickAddModal() {
                     value={dwEndStr}
                     onChange={(e) => {
                       setDwEndStr(e.target.value);
-                      setDwManualOverride(true);
+                      setDwOverride(true);
                     }}
                     placeholder="음용 적기 종료연도 (예: 2032)"
                     className="rounded-xl border border-subtle bg-surface px-3 py-2 text-xs tabular-nums text-primary focus:border-forest focus:outline-none"

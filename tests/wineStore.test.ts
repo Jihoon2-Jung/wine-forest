@@ -31,6 +31,9 @@ vi.mock('@/services/storage/localCache', () => ({
   loadLocalBackup: vi.fn(async (fileId: string) => {
     return memoryCache.backups.find((b) => b.fileId === fileId)?.data ?? null;
   }),
+  clearAllLocalBackups: vi.fn(async () => {
+    memoryCache.backups = [];
+  }),
   getCachedPhoto: vi.fn(async () => null),
   putCachedPhoto: vi.fn(async () => undefined),
   deleteCachedPhoto: vi.fn(async () => undefined),

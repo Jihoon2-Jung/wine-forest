@@ -1,5 +1,5 @@
 import { Camera, Check, Gift, Pencil, RotateCcw, Users, Wine, X } from 'lucide-react';
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { BottleInstance, CellarLocation, TastingRecord, WineMaster } from '@/types/schema';
 import { formatWineOrigin } from '@/services/domain/wineHelpers';
 import { pickImageFile } from '@/services/media/photoPicker';
@@ -24,14 +24,15 @@ export function HistoryCard({ tasting, bottle, wine, locations }: HistoryCardPro
 
   const [lightboxFileId, setLightboxFileId] = useState<string | null>(null);
   const [uploadingPhoto, setUploadingPhoto] = useState(false);
+  const [busy, setBusy] = useState(false);
   const [restoring, setRestoring] = useState(false);
-  const [restoreLocId, setRestoreLocId] = useState<string>(
+  const getDefaultRestoreLocId = () =>
     bottle.locationId && locations.some((l) => l.id === bottle.locationId)
       ? bottle.locationId
-      : locations[0]?.id ?? '',
-  );
+      : locations[0]?.id ?? '';
+  const [restoreLocId, setRestoreLocId] = useState<string>(getDefaultRestoreLocId);
 
-  // M7 + Phase 2-2/2-3A 보강: 소비/선물 이력 + 별점·동반자·시음노트·사진 수정 (저장/취소 시 파일 정합성 보장)
+  // M7 + Phase 2-2/2-3A 보강: 소비/선물 이력 + 별점·동반자·시음노트·사진 수정 (저장/취소·언마운트 시 파일 정합성 보장)
   const [editing, setEditing] = useState(false);
   const [draftType, setDraftType] = useState<'CONSUMED' | 'GIFTED'>(tasting.type);
   const [draftDate, setDraftDate] = useState(tasting.eventDate ?? '');
@@ -43,6 +44,21 @@ export function HistoryCard({ tasting, bottle, wine, locations }: HistoryCardPro
   const [draftPhotoFileIds, setDraftPhotoFileIds] = useState<string[]>(tasting.photoFileIds ?? []);
   const [pendingAddedPhotoIds, setPendingAddedPhotoIds] = useState<string[]>([]);
   const [pendingRemovedPhotoIds, setPendingRemovedPhotoIds] = useState<string[]>([]);
+
+  const pendingAddedRef = useRef<string[]>([]);
+  const editSessionRef = useRef(0);
+  const deletePhotoRef = useRef(deleteTastingPhotoFile);
+  deletePhotoRef.current = deleteTastingPhotoFile;
+
+  useEffect(() => {
+    return () => {
+      editSessionRef.current += 1;
+      for (const addedId of pendingAddedRef.current) {
+        void deletePhotoRef.current(addedId);
+      }
+      pendingAddedRef.current = [];
+    };
+  }, []);
 
   const isGift = tasting.type === 'GIFTED';
 
@@ -56,47 +72,77 @@ export function HistoryCard({ tasting, bottle, wine, locations }: HistoryCardPro
     setDraftTastingNote(tasting.tastingNote ?? '');
     setDraftPhotoFileIds(tasting.photoFileIds ?? []);
     setPendingAddedPhotoIds([]);
+    pendingAddedRef.current = [];
     setPendingRemovedPhotoIds([]);
   };
 
   const handleOpenEdit = () => {
+    editSessionRef.current += 1;
     resetDraftFromTasting();
     setRestoring(false);
     setEditing(true);
   };
 
   const handleCancelEdit = () => {
+    editSessionRef.current += 1;
     // 편집 중 새로 업로드했다가 취소한 파일만 Drive/캐시에서 정리 (기존 저장 사진은 보존)
-    for (const addedId of pendingAddedPhotoIds) {
+    for (const addedId of pendingAddedRef.current) {
       void deleteTastingPhotoFile(addedId);
     }
     resetDraftFromTasting();
     setEditing(false);
   };
 
+  const handleToggleRestore = () => {
+    if (editing) {
+      handleCancelEdit();
+    }
+    if (!restoring) {
+      setRestoreLocId(getDefaultRestoreLocId());
+    }
+    setRestoring((v) => !v);
+  };
+
   const handleConfirmRestore = async () => {
-    await restoreBottleToStock(bottle.id, restoreLocId || null);
-    setRestoring(false);
+    if (busy) return;
+    setBusy(true);
+    try {
+      const validLocId =
+        restoreLocId && locations.some((l) => l.id === restoreLocId) ? restoreLocId : null;
+      await restoreBottleToStock(bottle.id, validLocId);
+      setRestoring(false);
+    } finally {
+      setBusy(false);
+    }
   };
 
   const handleSaveEdit = async () => {
-    await updateTastingRecord(tasting.id, {
-      type: draftType,
-      eventDate: draftDate || null,
-      occasion: draftOccasion,
-      memo: draftMemo,
-      rating: draftRating,
-      companions: draftCompanions,
-      tastingNote: draftTastingNote,
-      photoFileIds: draftPhotoFileIds,
-    });
-    // 저장 확정 시에만 기존 사진 삭제 예약분을 실제로 제거
-    for (const removedId of pendingRemovedPhotoIds) {
-      void deleteTastingPhotoFile(removedId);
+    if (busy) return;
+    setBusy(true);
+    try {
+      const commitRes = await updateTastingRecord(tasting.id, {
+        type: draftType,
+        eventDate: draftDate || null,
+        occasion: draftOccasion,
+        memo: draftMemo,
+        rating: draftRating,
+        companions: draftCompanions,
+        tastingNote: draftTastingNote,
+        photoFileIds: draftPhotoFileIds,
+      });
+      // 동기화 성공(synced) 시에만 원격 Drive 삭제까지 확정 (충돌/오프라인 시 404 방지 - M10)
+      if (commitRes === 'synced') {
+        for (const removedId of pendingRemovedPhotoIds) {
+          void deleteTastingPhotoFile(removedId);
+        }
+      }
+      pendingAddedRef.current = [];
+      setPendingAddedPhotoIds([]);
+      setPendingRemovedPhotoIds([]);
+      setEditing(false);
+    } finally {
+      setBusy(false);
     }
-    setPendingAddedPhotoIds([]);
-    setPendingRemovedPhotoIds([]);
-    setEditing(false);
   };
 
   return (
@@ -188,12 +234,7 @@ export function HistoryCard({ tasting, bottle, wine, locations }: HistoryCardPro
             </button>
             <button
               type="button"
-              onClick={() => {
-                if (editing) {
-                  handleCancelEdit();
-                }
-                setRestoring((v) => !v);
-              }}
+              onClick={handleToggleRestore}
               className="inline-flex items-center gap-1 rounded-lg border border-subtle bg-elevated px-2.5 py-1.5 text-[11px] font-bold text-secondary hover:border-forest hover:text-forest"
             >
               <RotateCcw className="h-3 w-3" />
@@ -205,11 +246,11 @@ export function HistoryCard({ tasting, bottle, wine, locations }: HistoryCardPro
 
       {/* 보유 복원 패널 */}
       {restoring && (
-        <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-forest/35 bg-forest/8 p-3 text-xs">
+        <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-forest/35 bg-forest/[0.08] p-3 text-xs">
           <div className="flex flex-wrap items-center gap-2">
             <span className="font-bold text-forest">복원할 선반:</span>
             <select
-              value={restoreLocId}
+              value={locations.some((l) => l.id === restoreLocId) ? restoreLocId : ''}
               onChange={(e) => setRestoreLocId(e.target.value)}
               className="rounded-lg border border-subtle bg-surface px-2.5 py-1 text-xs text-primary"
             >
@@ -224,15 +265,17 @@ export function HistoryCard({ tasting, bottle, wine, locations }: HistoryCardPro
           <div className="flex items-center gap-1.5">
             <button
               type="button"
+              disabled={busy}
               onClick={() => setRestoring(false)}
-              className="rounded-lg border border-subtle bg-surface px-2.5 py-1 text-xs font-semibold text-secondary"
+              className="rounded-lg border border-subtle bg-surface px-2.5 py-1 text-xs font-semibold text-secondary disabled:opacity-50"
             >
               취소
             </button>
             <button
               type="button"
+              disabled={busy}
               onClick={() => void handleConfirmRestore()}
-              className="rounded-lg bg-forest px-3 py-1 text-xs font-bold text-white"
+              className="rounded-lg bg-forest px-3 py-1 text-xs font-bold text-white disabled:opacity-50"
             >
               보유로 복원 확인
             </button>
@@ -301,13 +344,19 @@ export function HistoryCard({ tasting, bottle, wine, locations }: HistoryCardPro
                   type="button"
                   disabled={uploadingPhoto}
                   onClick={async () => {
-                    if (draftPhotoFileIds.length >= 3) return;
+                    if (draftPhotoFileIds.length >= 3 || uploadingPhoto) return;
                     const blob = await pickImageFile({ preset: 'tasting' });
                     if (!blob) return;
+                    const sessionAtStart = editSessionRef.current;
                     setUploadingPhoto(true);
                     try {
                       const uploadedId = await uploadTastingPhoto(blob);
                       if (uploadedId) {
+                        if (editSessionRef.current !== sessionAtStart) {
+                          void deletePhotoRef.current(uploadedId);
+                          return;
+                        }
+                        pendingAddedRef.current = [...pendingAddedRef.current, uploadedId];
                         setDraftPhotoFileIds((prev) => [...prev, uploadedId]);
                         setPendingAddedPhotoIds((prev) => [...prev, uploadedId]);
                       }
@@ -333,6 +382,9 @@ export function HistoryCard({ tasting, bottle, wine, locations }: HistoryCardPro
                       setDraftPhotoFileIds((prev) => prev.filter((id) => id !== pid));
                       if (pendingAddedPhotoIds.includes(pid)) {
                         // 이번 편집에서 새로 올린 미저장 파일은 즉시 정리
+                        pendingAddedRef.current = pendingAddedRef.current.filter(
+                          (id) => id !== pid,
+                        );
                         setPendingAddedPhotoIds((prev) => prev.filter((id) => id !== pid));
                         void deleteTastingPhotoFile(pid);
                       } else {
@@ -350,16 +402,18 @@ export function HistoryCard({ tasting, bottle, wine, locations }: HistoryCardPro
           <div className="flex justify-end gap-1.5">
             <button
               type="button"
+              disabled={busy}
               onClick={handleCancelEdit}
-              className="inline-flex items-center gap-1 rounded-lg border border-subtle bg-surface px-2.5 py-1 text-xs font-semibold text-secondary"
+              className="inline-flex items-center gap-1 rounded-lg border border-subtle bg-surface px-2.5 py-1 text-xs font-semibold text-secondary disabled:opacity-50"
             >
               <X className="h-3.5 w-3.5" />
               취소
             </button>
             <button
               type="button"
+              disabled={busy}
               onClick={() => void handleSaveEdit()}
-              className="inline-flex items-center gap-1 rounded-lg bg-forest px-2.5 py-1 text-xs font-bold text-white"
+              className="inline-flex items-center gap-1 rounded-lg bg-forest px-2.5 py-1 text-xs font-bold text-white disabled:opacity-50"
             >
               <Check className="h-3.5 w-3.5" />
               저장

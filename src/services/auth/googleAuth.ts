@@ -62,6 +62,10 @@ export function restoreAuthSession(): Promise<AuthTokenResult | null> {
   return getAuthAdapter().restoreSession();
 }
 
+export function invalidateAuthToken(): void {
+  getAuthAdapter().invalidateToken();
+}
+
 export async function clearAccessToken(): Promise<void> {
   await getAuthAdapter().signOut();
 }

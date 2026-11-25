@@ -27,6 +27,8 @@ export interface AuthAdapter {
   restoreSession(): Promise<AuthTokenResult | null>;
   /** 사용자 클릭 기반 명시적 로그인 */
   signIn(prompt?: '' | 'consent' | 'select_account'): Promise<AuthTokenResult>;
+  /** 401 응답 등으로 서버에서 거부된 현재 메모리 토큰을 즉시 무효화 */
+  invalidateToken(): void;
   /** 로그아웃 / 토큰 폐기 */
   signOut(): Promise<void>;
 }

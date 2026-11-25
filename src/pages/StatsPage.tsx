@@ -1,5 +1,5 @@
 import { Clock, Sparkles } from 'lucide-react';
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import type { WineColor } from '@/types/schema';
 import {
@@ -12,6 +12,7 @@ import {
   type RegionRankItem,
 } from '@/services/analytics/statsCalculator';
 import { useWineStore, type DrinkingWindowFilter } from '@/store/useWineStore';
+import { ConfirmDialog } from '@/components/common/ConfirmDialog';
 import { ColorDonutChart } from '@/components/stats/ColorDonutChart';
 import { KpiGrid } from '@/components/stats/KpiGrid';
 import { PriceDistChart } from '@/components/stats/PriceDistChart';
@@ -24,6 +25,8 @@ export default function StatsPage() {
   const setFilters = useWineStore((s) => s.setFilters);
   const autoFillMissingDrinkingWindows = useWineStore((s) => s.autoFillMissingDrinkingWindows);
   const navigate = useNavigate();
+  const [confirmAutoFill, setConfirmAutoFill] = useState(false);
+  const [autoFillBusy, setAutoFillBusy] = useState(false);
 
   const stats = useMemo(() => {
     if (!db) return null;
@@ -95,15 +98,7 @@ export default function StatsPage() {
             {missingDwCount > 0 && (
               <button
                 type="button"
-                onClick={() => {
-                  if (
-                    window.confirm(
-                      `음용 적기가 비어 있는 ${missingDwCount}종 와인에 지역·빈티지 기준 추천 연도를 일괄 채울까요?\n(이미 입력된 와인은 유지됩니다.)`,
-                    )
-                  ) {
-                    void autoFillMissingDrinkingWindows();
-                  }
-                }}
+                onClick={() => setConfirmAutoFill(true)}
                 className="inline-flex items-center gap-1 rounded-lg bg-forest px-2.5 py-1 text-[11px] font-bold text-white hover:bg-forest-hover"
               >
                 <Sparkles className="h-3 w-3" />
@@ -117,9 +112,9 @@ export default function StatsPage() {
           <button
             type="button"
             onClick={() => handleDrillDrinkingWindow('ready_now')}
-            className="rounded-xl border border-[var(--status-ok)]/30 bg-[var(--status-ok)]/10 p-3 text-left transition-colors hover:bg-[var(--status-ok)]/15"
+            className="rounded-xl border border-status-ok/30 bg-status-ok/10 p-3 text-left transition-colors hover:bg-status-ok/15"
           >
-            <div className="text-[11px] font-bold text-[var(--status-ok)]">지금 마시기 좋음</div>
+            <div className="text-[11px] font-bold text-status-ok">지금 마시기 좋음</div>
             <div className="mt-1 text-lg font-extrabold tabular-nums text-primary">
               {stats.drinkingWindow.readyBottles + stats.drinkingWindow.closingSoonBottles}병
             </div>
@@ -131,9 +126,9 @@ export default function StatsPage() {
           <button
             type="button"
             onClick={() => handleDrillDrinkingWindow('closing_soon')}
-            className="rounded-xl border border-[var(--status-warn)]/35 bg-[var(--status-warn)]/10 p-3 text-left transition-colors hover:bg-[var(--status-warn)]/15"
+            className="rounded-xl border border-status-warn/35 bg-status-warn/10 p-3 text-left transition-colors hover:bg-status-warn/15"
           >
-            <div className="text-[11px] font-bold text-[var(--status-warn)]">마감 임박</div>
+            <div className="text-[11px] font-bold text-status-warn">마감 임박</div>
             <div className="mt-1 text-lg font-extrabold tabular-nums text-primary">
               {stats.drinkingWindow.closingSoonBottles}병
             </div>
@@ -145,9 +140,9 @@ export default function StatsPage() {
           <button
             type="button"
             onClick={() => handleDrillDrinkingWindow('past_peak')}
-            className="rounded-xl border border-[var(--status-danger)]/30 bg-[var(--status-danger)]/10 p-3 text-left transition-colors hover:bg-[var(--status-danger)]/15"
+            className="rounded-xl border border-status-danger/30 bg-status-danger/10 p-3 text-left transition-colors hover:bg-status-danger/15"
           >
-            <div className="text-[11px] font-bold text-[var(--status-danger)]">적기 경과</div>
+            <div className="text-[11px] font-bold text-status-danger">적기 경과</div>
             <div className="mt-1 text-lg font-extrabold tabular-nums text-primary">
               {stats.drinkingWindow.pastPeakBottles}병
             </div>
@@ -183,6 +178,25 @@ export default function StatsPage() {
         <TrendChart monthlyData={stats.monthlyTrend} yearlyData={stats.yearlyTrend} />
         <PriceDistChart data={stats.priceDist} />
       </div>
+
+      <ConfirmDialog
+        open={confirmAutoFill}
+        title="음용 적기 일괄 자동 채우기"
+        message={`음용 적기가 비어 있는 ${missingDwCount}종 와인에 지역·빈티지 기준 추천 연도를 일괄 채울까요?\n(이미 입력된 와인은 유지됩니다.)`}
+        confirmLabel="자동 채우기"
+        busy={autoFillBusy}
+        onCancel={() => setConfirmAutoFill(false)}
+        onConfirm={async () => {
+          if (autoFillBusy) return;
+          setAutoFillBusy(true);
+          try {
+            await autoFillMissingDrinkingWindows();
+            setConfirmAutoFill(false);
+          } finally {
+            setAutoFillBusy(false);
+          }
+        }}
+      />
     </div>
   );
 }

@@ -187,6 +187,9 @@ export function FilterBar() {
           }`}
         >
           <option value="">국가: 전체</option>
+          {filters.country && !countryCounts.some(([c]) => c === filters.country) && (
+            <option value={filters.country}>{filters.country} (0)</option>
+          )}
           {countryCounts.map(([country, cnt]) => (
             <option key={country} value={country}>
               {country} ({cnt})
@@ -206,6 +209,9 @@ export function FilterBar() {
           }`}
         >
           <option value="">지역: 전체</option>
+          {filters.region && !regionCounts.some(([r]) => r === filters.region) && (
+            <option value={filters.region}>{filters.region} (0)</option>
+          )}
           {regionCounts.map(([region, cnt]) => (
             <option key={region} value={region}>
               {region} ({cnt})
@@ -214,7 +220,7 @@ export function FilterBar() {
         </select>
 
         {/* 3단계: 세부지역 (마을·밭·그랑크뤼 — 해당 범위에 세부지역이 있을 때 활성화) */}
-        {subRegionCounts.length > 0 && (
+        {(subRegionCounts.length > 0 || Boolean(filters.subRegion)) && (
           <select
             aria-label="세부지역 필터"
             value={filters.subRegion}
@@ -226,6 +232,9 @@ export function FilterBar() {
             }`}
           >
             <option value="">세부지역: 전체</option>
+            {filters.subRegion && !subRegionCounts.some(([sr]) => sr === filters.subRegion) && (
+              <option value={filters.subRegion}>{filters.subRegion} (0)</option>
+            )}
             {subRegionCounts.map(([sub, cnt]) => (
               <option key={sub} value={sub}>
                 {sub} ({cnt})
@@ -246,6 +255,11 @@ export function FilterBar() {
           }`}
         >
           <option value="">보관 위치: 전체</option>
+          {filters.zone &&
+            filters.zone !== '__UNASSIGNED__' &&
+            !zones.includes(filters.zone) && (
+              <option value={filters.zone}>{filters.zone} (삭제됨)</option>
+            )}
           {zones.map((z) => (
             <option key={z} value={z}>
               {z}
@@ -281,7 +295,7 @@ export function FilterBar() {
           }
           className={`inline-flex items-center gap-1 rounded-xl border px-2.5 py-1.5 text-xs font-bold transition-colors ${
             filters.drinkingWindow === 'ready_now'
-              ? 'border-[var(--status-ok)] bg-[var(--status-ok)]/15 text-[var(--status-ok)]'
+              ? 'border-status-ok bg-status-ok/15 text-status-ok'
               : 'border-subtle bg-surface text-secondary hover:border-forest hover:text-forest'
           }`}
           title="지금 마시기 좋은 와인만 모아보기"

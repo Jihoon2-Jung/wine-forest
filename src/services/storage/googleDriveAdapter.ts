@@ -1,9 +1,10 @@
 import type { WineDatabase } from '@/types/schema';
 import { parseWineDatabase } from '@/types/validation';
-import { ensureAccessToken, isNativeAuth } from '@/services/auth/googleAuth';
+import { ensureAccessToken, invalidateAuthToken, isNativeAuth } from '@/services/auth/googleAuth';
 import {
   AuthRequiredError,
   ConflictError,
+  FileNotFoundError,
   type BackupSnapshot,
   type RemoteFileMeta,
   type StorageAdapter,
@@ -34,6 +35,11 @@ export class GoogleDriveAdapter implements StorageAdapter {
     backupFolderId: string;
     photoFolderId: string;
   } | null = null;
+  private workspacePromise: Promise<{
+    rootFolderId: string;
+    backupFolderId: string;
+    photoFolderId: string;
+  }> | null = null;
 
   private async fetchDrive(
     url: string,
@@ -50,6 +56,7 @@ export class GoogleDriveAdapter implements StorageAdapter {
         await ensureAccessToken({ forceRefresh: true });
         return this.fetchDrive(url, init, true, options);
       }
+      invalidateAuthToken();
       throw new AuthRequiredError('구글 인증이 만료되었습니다. 1클릭 재인증을 진행해 주세요.');
     }
     if (options?.allowNotFound && response.status === 404) {
@@ -64,7 +71,7 @@ export class GoogleDriveAdapter implements StorageAdapter {
 
   private async findFolder(name: string, parentId?: string): Promise<string | null> {
     const parentClause = parentId ? `'${parentId}' in parents` : `'root' in parents`;
-    // 먼저 appProperties 태그가 있는 폴더를 우선 검색(중복 생성 레이스 대응)
+    // 먼저 appProperties 태그가 있는 폴더를 오래된 기준(원본 폴더 우선)으로 검색
     const taggedQ = [
       `name = '${name}'`,
       `mimeType = '${FOLDER_MIME}'`,
@@ -75,15 +82,15 @@ export class GoogleDriveAdapter implements StorageAdapter {
 
     const taggedParams = new URLSearchParams({
       q: taggedQ,
-      fields: 'files(id,name,modifiedTime)',
-      orderBy: 'modifiedTime desc',
+      fields: 'files(id,name,createdTime,modifiedTime)',
+      orderBy: 'createdTime asc',
       pageSize: '5',
     });
     const taggedRes = await this.fetchDrive(`${DRIVE_API_BASE}/files?${taggedParams}`);
     const taggedJson = (await taggedRes.json()) as { files?: DriveFileItem[] };
     if (taggedJson.files && taggedJson.files.length > 0) {
       if (taggedJson.files.length > 1) {
-        console.warn(`[JH Wine Forest] 중복 폴더(${name}) 감지 — 최신 폴더를 사용합니다.`);
+        console.warn(`[JH Wine Forest] 중복 폴더(${name}) 감지 — 최초 생성된 원본 폴더를 사용합니다.`);
       }
       return taggedJson.files[0].id;
     }
@@ -97,8 +104,8 @@ export class GoogleDriveAdapter implements StorageAdapter {
     ].join(' and ');
     const fallbackParams = new URLSearchParams({
       q: fallbackQ,
-      fields: 'files(id,name,modifiedTime)',
-      orderBy: 'modifiedTime desc',
+      fields: 'files(id,name,createdTime,modifiedTime)',
+      orderBy: 'createdTime asc',
       pageSize: '5',
     });
     const fallbackRes = await this.fetchDrive(`${DRIVE_API_BASE}/files?${fallbackParams}`);
@@ -132,25 +139,40 @@ export class GoogleDriveAdapter implements StorageAdapter {
     if (this.workspaceIds) {
       return this.workspaceIds;
     }
+    if (this.workspacePromise) {
+      return this.workspacePromise;
+    }
 
-    const rootFolderId =
-      (await this.findFolder(ROOT_FOLDER_NAME)) ?? (await this.createFolder(ROOT_FOLDER_NAME));
+    const task = (async () => {
+      const rootFolderId =
+        (await this.findFolder(ROOT_FOLDER_NAME)) ?? (await this.createFolder(ROOT_FOLDER_NAME));
 
-    const [backupFolderId, photoFolderId] = await Promise.all([
-      this.findFolder(BACKUP_FOLDER_NAME, rootFolderId).then(
-        (id) => id ?? this.createFolder(BACKUP_FOLDER_NAME, rootFolderId),
-      ),
-      this.findFolder(PHOTO_FOLDER_NAME, rootFolderId).then(
-        (id) => id ?? this.createFolder(PHOTO_FOLDER_NAME, rootFolderId),
-      ),
-    ]);
+      const [backupFolderId, photoFolderId] = await Promise.all([
+        this.findFolder(BACKUP_FOLDER_NAME, rootFolderId).then(
+          (id) => id ?? this.createFolder(BACKUP_FOLDER_NAME, rootFolderId),
+        ),
+        this.findFolder(PHOTO_FOLDER_NAME, rootFolderId).then(
+          (id) => id ?? this.createFolder(PHOTO_FOLDER_NAME, rootFolderId),
+        ),
+      ]);
 
-    this.workspaceIds = { rootFolderId, backupFolderId, photoFolderId };
-    return this.workspaceIds;
+      this.workspaceIds = { rootFolderId, backupFolderId, photoFolderId };
+      return this.workspaceIds;
+    })();
+
+    this.workspacePromise = task;
+    try {
+      return await task;
+    } finally {
+      if (this.workspacePromise === task) {
+        this.workspacePromise = null;
+      }
+    }
   }
 
   resetWorkspaceCache(): void {
     this.workspaceIds = null;
+    this.workspacePromise = null;
   }
 
   async findDbFile(): Promise<RemoteFileMeta | null> {
@@ -181,16 +203,26 @@ export class GoogleDriveAdapter implements StorageAdapter {
   }
 
   async getFileModifiedTime(fileId: string): Promise<string> {
-    const res = await this.fetchDrive(`${DRIVE_API_BASE}/files/${fileId}?fields=modifiedTime`);
-    const meta = (await res.json()) as { modifiedTime: string };
+    const res = await this.fetchDrive(
+      `${DRIVE_API_BASE}/files/${fileId}?fields=modifiedTime,trashed`,
+      {},
+      false,
+      { allowNotFound: true },
+    );
+    if (res.status === 404) {
+      throw new FileNotFoundError(fileId);
+    }
+    const meta = (await res.json()) as { modifiedTime: string; trashed?: boolean };
+    if (meta.trashed) {
+      throw new FileNotFoundError(fileId);
+    }
     return meta.modifiedTime;
   }
 
   async loadDb(fileId: string): Promise<{ data: WineDatabase; modifiedTime: string }> {
-    const [modifiedTime, contentRes] = await Promise.all([
-      this.getFileModifiedTime(fileId),
-      this.fetchDrive(`${DRIVE_API_BASE}/files/${fileId}?alt=media`),
-    ]);
+    // modifiedTime을 본문(alt=media)보다 선행 조회해 구버전 본문에 신버전 시각이 찍히는 역전 차단
+    const modifiedTime = await this.getFileModifiedTime(fileId);
+    const contentRes = await this.fetchDrive(`${DRIVE_API_BASE}/files/${fileId}?alt=media`);
     const raw = (await contentRes.json()) as unknown;
     const data = parseWineDatabase(raw);
     return { data, modifiedTime };
@@ -223,16 +255,37 @@ export class GoogleDriveAdapter implements StorageAdapter {
     const jsonString = JSON.stringify(validated, null, 2);
 
     if (fileId) {
-      // 저장 직전 낙관적 잠금 충돌 검사
-      if (expectedModifiedTime !== null) {
-        const remoteModifiedTime = await this.getFileModifiedTime(fileId);
-        if (remoteModifiedTime !== expectedModifiedTime) {
-          throw new ConflictError(fileId, expectedModifiedTime, remoteModifiedTime);
-        }
+      // 저장 직전 낙관적 잠금 충돌 검사 및 휴지통/삭제 여부 확인
+      const remoteModifiedTime = await this.getFileModifiedTime(fileId);
+      if (expectedModifiedTime !== null && remoteModifiedTime !== expectedModifiedTime) {
+        throw new ConflictError(fileId, expectedModifiedTime, remoteModifiedTime);
       }
 
       const res = await this.fetchDrive(
         `${DRIVE_UPLOAD_BASE}/files/${fileId}?uploadType=media&fields=id,modifiedTime`,
+        {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json; charset=UTF-8' },
+          body: jsonString,
+        },
+        false,
+        { allowNotFound: true },
+      );
+      if (res.status === 404) {
+        throw new FileNotFoundError(fileId);
+      }
+      const updated = (await res.json()) as { id: string; modifiedTime: string };
+      return { fileId: updated.id, modifiedTime: updated.modifiedTime };
+    }
+
+    // 최초 파일 생성 전 기존 파일 재확인(이전 생성 응답 유실 시 중복 wine_db.json 생성 방지)
+    const existing = await this.findDbFile();
+    if (existing) {
+      if (expectedModifiedTime !== null && existing.modifiedTime !== expectedModifiedTime) {
+        throw new ConflictError(existing.fileId, expectedModifiedTime, existing.modifiedTime);
+      }
+      const res = await this.fetchDrive(
+        `${DRIVE_UPLOAD_BASE}/files/${existing.fileId}?uploadType=media&fields=id,modifiedTime`,
         {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json; charset=UTF-8' },
@@ -306,20 +359,35 @@ export class GoogleDriveAdapter implements StorageAdapter {
   async listBackups(): Promise<BackupSnapshot[]> {
     const { backupFolderId } = await this.ensureWorkspace();
     const q = [`'${backupFolderId}' in parents`, 'trashed = false'].join(' and ');
-    const params = new URLSearchParams({
-      q,
-      fields: 'files(id,name,createdTime,size)',
-      orderBy: 'createdTime desc',
-      pageSize: '100',
-    });
-    const res = await this.fetchDrive(`${DRIVE_API_BASE}/files?${params}`);
-    const json = (await res.json()) as { files?: DriveFileItem[] };
-    return (json.files ?? []).map((f) => ({
-      fileId: f.id,
-      name: f.name,
-      createdTime: f.createdTime ?? '',
-      sizeBytes: f.size ? Number(f.size) : undefined,
-    }));
+    const results: BackupSnapshot[] = [];
+    let pageToken: string | undefined;
+    const maxPages = 5;
+
+    for (let page = 0; page < maxPages; page += 1) {
+      const params = new URLSearchParams({
+        q,
+        fields: 'nextPageToken,files(id,name,createdTime,size)',
+        orderBy: 'createdTime desc',
+        pageSize: '100',
+      });
+      if (pageToken) {
+        params.set('pageToken', pageToken);
+      }
+      const res = await this.fetchDrive(`${DRIVE_API_BASE}/files?${params}`);
+      const json = (await res.json()) as { files?: DriveFileItem[]; nextPageToken?: string };
+      for (const f of json.files ?? []) {
+        results.push({
+          fileId: f.id,
+          name: f.name,
+          createdTime: f.createdTime ?? '',
+          sizeBytes: f.size ? Number(f.size) : undefined,
+        });
+      }
+      if (!json.nextPageToken) break;
+      pageToken = json.nextPageToken;
+    }
+
+    return results;
   }
 
   async loadBackup(fileId: string): Promise<WineDatabase> {

@@ -24,6 +24,12 @@ const LOCAL_FILE_ID = 'local-test-wine-db';
  */
 export class LocalOnlyAdapter implements StorageAdapter {
   private lastSavedModifiedTime: string | null = null;
+  private committedData: WineDatabase | null = null;
+
+  reset(): void {
+    this.lastSavedModifiedTime = null;
+    this.committedData = null;
+  }
 
   async ensureWorkspace() {
     return {
@@ -34,6 +40,12 @@ export class LocalOnlyAdapter implements StorageAdapter {
   }
 
   async findDbFile(): Promise<RemoteFileMeta | null> {
+    if (this.committedData && this.lastSavedModifiedTime) {
+      return {
+        fileId: LOCAL_FILE_ID,
+        modifiedTime: this.lastSavedModifiedTime,
+      };
+    }
     const cached = await loadCachedState();
     if (!cached?.data) return null;
     const modifiedTime =
@@ -50,6 +62,12 @@ export class LocalOnlyAdapter implements StorageAdapter {
   }
 
   async loadDb(_fileId: string): Promise<{ data: WineDatabase; modifiedTime: string }> {
+    if (this.committedData && this.lastSavedModifiedTime) {
+      return {
+        data: parseWineDatabase(structuredClone(this.committedData)),
+        modifiedTime: this.lastSavedModifiedTime,
+      };
+    }
     const cached = await loadCachedState();
     if (!cached?.data) {
       throw new Error('로컬 테스트 DB가 존재하지 않습니다.');
@@ -65,7 +83,7 @@ export class LocalOnlyAdapter implements StorageAdapter {
     data: WineDatabase,
     expectedModifiedTime: string | null,
   ): Promise<{ fileId: string; modifiedTime: string }> {
-    parseWineDatabase(data);
+    const validated = parseWineDatabase(data);
     if (
       expectedModifiedTime !== null &&
       this.lastSavedModifiedTime !== null &&
@@ -76,6 +94,7 @@ export class LocalOnlyAdapter implements StorageAdapter {
 
     const modifiedTime = new Date().toISOString();
     this.lastSavedModifiedTime = modifiedTime;
+    this.committedData = structuredClone(validated);
     return {
       fileId: LOCAL_FILE_ID,
       modifiedTime,

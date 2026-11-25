@@ -15,7 +15,7 @@ export function FabButton() {
     <button
       type="button"
       onClick={() => openQuickAdd(null)}
-      className="fixed right-4 bottom-20 z-30 flex h-14 items-center gap-1.5 rounded-full bg-forest px-5 text-sm font-bold text-white shadow-card-hover transition-transform active:scale-95 hover:bg-forest-hover lg:hidden"
+      className="fixed right-4 bottom-[calc(5rem+env(safe-area-inset-bottom,0px))] z-30 flex h-14 items-center gap-1.5 rounded-full bg-forest px-5 text-sm font-bold text-white shadow-card-hover transition-transform active:scale-95 hover:bg-forest-hover lg:hidden"
       aria-label="와인 입고"
     >
       <Plus className="h-5 w-5" />

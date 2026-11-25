@@ -7,6 +7,7 @@ export async function syncStatusBar(theme: 'light' | 'dark'): Promise<void> {
   if (!Capacitor.isNativePlatform()) return;
   try {
     const { StatusBar, Style } = await import('@capacitor/status-bar');
+    await StatusBar.setOverlaysWebView({ overlay: true }).catch(() => undefined);
     await StatusBar.setStyle({
       style: theme === 'dark' ? Style.Dark : Style.Light,
     });
@@ -31,7 +32,7 @@ export async function exportJsonWithNativeShare(
     document.body.appendChild(a);
     a.click();
     a.remove();
-    URL.revokeObjectURL(url);
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
     return 'downloaded';
   }
 
@@ -55,7 +56,6 @@ export async function exportJsonWithNativeShare(
 
     await Share.share({
       title: 'JH Wine Forest 백업 내보내기',
-      text: fileName,
       url: uri,
       dialogTitle: 'wine_db.json 내보내기',
     });

@@ -16,7 +16,7 @@ export function StarRatingBadge({ rating, count, size = 'xs' }: StarRatingBadgeP
       : rating.toFixed(1);
   return (
     <span
-      className={`inline-flex items-center gap-0.5 rounded-full border border-gold/35 bg-gold/12 font-bold tabular-nums text-gold ${
+      className={`inline-flex items-center gap-0.5 rounded-full border border-gold/35 bg-gold/[0.12] font-bold tabular-nums text-gold ${
         size === 'sm' ? 'px-2 py-0.5 text-xs' : 'px-1.5 py-0.5 text-[11px]'
       }`}
       aria-label={`평점 ${isLegacyHundredScale ? formatted : `${formatted}점`}`}
@@ -64,6 +64,8 @@ export function StarRatingInput({ value, onChange }: StarRatingInputProps) {
               {/* 좌측 0.5점 클릭 영역 */}
               <button
                 type="button"
+                role="radio"
+                aria-checked={value === halfVal}
                 onClick={() => onChange(value === halfVal ? null : halfVal)}
                 className="absolute inset-y-0 left-0 w-1/2 cursor-pointer"
                 aria-label={`${halfVal}점`}
@@ -72,6 +74,8 @@ export function StarRatingInput({ value, onChange }: StarRatingInputProps) {
               {/* 우측 1.0점 클릭 영역 */}
               <button
                 type="button"
+                role="radio"
+                aria-checked={value === fullVal}
                 onClick={() => onChange(value === fullVal ? null : fullVal)}
                 className="absolute inset-y-0 right-0 w-1/2 cursor-pointer"
                 aria-label={`${fullVal}.0점`}

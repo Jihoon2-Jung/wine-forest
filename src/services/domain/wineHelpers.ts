@@ -11,6 +11,11 @@ export function generateId(): string {
   });
 }
 
+function normalizeNameForKey(name: string): string {
+  const nfc = typeof name.normalize === 'function' ? name.normalize('NFC') : name;
+  return nfc.trim().replace(/\s+/g, ' ').toLowerCase();
+}
+
 /**
  * R6 보강: 와인 마스터 중복 병합 키에 color를 포함해
  * 동일 명칭·빈티지의 레드/화이트가 잘못 합쳐지는 오류 방지
@@ -22,7 +27,7 @@ export function buildWineMasterKey(params: {
   color: WineColor;
 }): string {
   return [
-    params.name.trim().toLowerCase(),
+    normalizeNameForKey(params.name),
     params.vintage.trim().toUpperCase(),
     String(params.bottleSizeMl),
     params.color,
@@ -33,7 +38,7 @@ export function buildWineMasterKey(params: {
  * 라벨 사진 공통 매칭 키: 빈티지·용량 구분 없이 (와인명, 색상) 단위로 라벨 공유
  */
 export function buildWineLabelGroupKey(params: { name: string; color: WineColor }): string {
-  return `${params.name.trim().toLowerCase()}|${params.color}`;
+  return `${normalizeNameForKey(params.name)}|${params.color}`;
 }
 
 export function findMatchingWineMaster(
@@ -57,11 +62,15 @@ export function getTodayIsoDate(): string {
   return `${year}-${month}-${day}`;
 }
 
+const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+
 export function shouldIncludeInTrackingSince(
   purchaseDate: string | null,
   trackingSinceDate: string,
 ): boolean {
-  if (!purchaseDate) return false;
+  if (!purchaseDate || !ISO_DATE_RE.test(purchaseDate) || !ISO_DATE_RE.test(trackingSinceDate)) {
+    return false;
+  }
   return purchaseDate >= trackingSinceDate;
 }
 
@@ -70,26 +79,34 @@ export function formatKrw(value: number): string {
 }
 
 export function formatCompactKrw(value: number): string {
-  if (Math.abs(value) >= 100_000_000) {
+  const abs = Math.abs(value);
+  if (abs >= 99_950_000) {
     return `${(value / 100_000_000).toFixed(1)}억`;
   }
-  if (Math.abs(value) >= 10_000) {
+  if (abs >= 9_999.5) {
+    if (abs < 1_000_000) {
+      const man = Math.round((value / 10_000) * 10) / 10;
+      const formatted = Number.isInteger(man) ? man.toLocaleString('ko-KR') : man.toFixed(1);
+      return `${formatted}만`;
+    }
     return `${Math.round(value / 10_000).toLocaleString('ko-KR')}만`;
   }
   return `${Math.round(value).toLocaleString('ko-KR')}원`;
 }
 
 /**
- * 빈티지 비교: NV는 항상 뒤로 배치
+ * 빈티지 비교: NV 및 비숫자 값은 항상 뒤로 배치
  */
 export function compareVintage(a: string, b: string, direction: 'asc' | 'desc' = 'asc'): number {
-  const aIsNv = a.toUpperCase() === 'NV';
-  const bIsNv = b.toUpperCase() === 'NV';
-  if (aIsNv && bIsNv) return 0;
-  if (aIsNv) return 1;
-  if (bIsNv) return -1;
-  const numA = Number(a);
-  const numB = Number(b);
+  const cleanA = a.trim().toUpperCase();
+  const cleanB = b.trim().toUpperCase();
+  const numA = /^\d{4}$/.test(cleanA) ? Number(cleanA) : NaN;
+  const numB = /^\d{4}$/.test(cleanB) ? Number(cleanB) : NaN;
+  const aInvalid = Number.isNaN(numA);
+  const bInvalid = Number.isNaN(numB);
+  if (aInvalid && bInvalid) return cleanA.localeCompare(cleanB);
+  if (aInvalid) return 1;
+  if (bInvalid) return -1;
   return direction === 'asc' ? numA - numB : numB - numA;
 }
 
@@ -98,9 +115,14 @@ export function compareVintage(a: string, b: string, direction: 'asc' | 'desc' =
  */
 export function sortBottlesFifo(bottles: BottleInstance[]): BottleInstance[] {
   return [...bottles].sort((a, b) => {
-    const dateA = a.purchaseDate ?? '9999-12-31';
-    const dateB = b.purchaseDate ?? '9999-12-31';
+    const dateA = a.purchaseDate || '9999-12-31';
+    const dateB = b.purchaseDate || '9999-12-31';
     if (dateA !== dateB) return dateA.localeCompare(dateB);
+    const tsA = Date.parse(a.createdAt);
+    const tsB = Date.parse(b.createdAt);
+    if (!Number.isNaN(tsA) && !Number.isNaN(tsB) && tsA !== tsB) {
+      return tsA - tsB;
+    }
     return a.createdAt.localeCompare(b.createdAt);
   });
 }
@@ -176,17 +198,17 @@ export const DRINKING_WINDOW_BADGE_META: Record<
   ready: {
     label: '지금 적기',
     shortLabel: '적기',
-    className: 'bg-[var(--status-ok)]/15 text-[var(--status-ok)] border-[var(--status-ok)]/30',
+    className: 'bg-status-ok/15 text-status-ok border-status-ok/30',
   },
   closing_soon: {
     label: '마감 임박',
     shortLabel: '마감임박',
-    className: 'bg-[var(--status-warn)]/15 text-[var(--status-warn)] border-[var(--status-warn)]/35',
+    className: 'bg-status-warn/15 text-status-warn border-status-warn/35',
   },
   past_peak: {
     label: '적기 경과',
     shortLabel: '경과',
-    className: 'bg-[var(--status-danger)]/12 text-[var(--status-danger)] border-[var(--status-danger)]/30',
+    className: 'bg-status-danger/[0.12] text-status-danger border-status-danger/30',
   },
   too_young: {
     label: '숙성 중',

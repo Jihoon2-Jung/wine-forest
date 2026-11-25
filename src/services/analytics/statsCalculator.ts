@@ -151,7 +151,8 @@ export function calculateColorDistribution(db: WineDatabase): ColorDistributionI
     if (bottle.status !== 'IN_STOCK') continue;
     const wine = wineMap.get(bottle.wineId);
     if (!wine) continue;
-    const entry = counts.get(wine.color)!;
+    const entry = counts.get(wine.color);
+    if (!entry) continue;
     entry.count += 1;
     entry.value += bottle.purchasePrice;
     total += 1;
@@ -264,8 +265,13 @@ export function calculatePurchaseVsConsumptionTrend(
       }
     }
 
+    const seenConsumedBottleIds = new Set<string>();
     for (const tasting of db.tastings) {
       if (tasting.type !== 'CONSUMED') continue;
+      if (seenConsumedBottleIds.has(tasting.bottleId)) continue;
+      const bottle = bottleMap.get(tasting.bottleId);
+      if (!bottle || bottle.status !== 'CONSUMED') continue;
+      seenConsumedBottleIds.add(tasting.bottleId);
       if (!tasting.eventDate) {
         unknownEventDateCount += 1;
         continue;
@@ -273,9 +279,8 @@ export function calculatePurchaseVsConsumptionTrend(
       const ym = tasting.eventDate.slice(0, 7);
       const pt = pointMap.get(ym);
       if (pt) {
-        const bottle = bottleMap.get(tasting.bottleId);
         pt.consumedCount += 1;
-        pt.consumedValue += bottle?.purchasePrice ?? 0;
+        pt.consumedValue += bottle.purchasePrice;
       }
     }
 
@@ -315,17 +320,35 @@ export function calculatePurchaseVsConsumptionTrend(
     pt.purchasedValue += bottle.purchasePrice;
   }
 
+  const seenConsumedBottleIds = new Set<string>();
   for (const tasting of db.tastings) {
     if (tasting.type !== 'CONSUMED') continue;
+    if (seenConsumedBottleIds.has(tasting.bottleId)) continue;
+    const bottle = bottleMap.get(tasting.bottleId);
+    if (!bottle || bottle.status !== 'CONSUMED') continue;
+    seenConsumedBottleIds.add(tasting.bottleId);
     if (!tasting.eventDate) {
       unknownEventDateCount += 1;
       continue;
     }
     const year = tasting.eventDate.slice(0, 4);
     const pt = ensureYear(year);
-    const bottle = bottleMap.get(tasting.bottleId);
     pt.consumedCount += 1;
-    pt.consumedValue += bottle?.purchasePrice ?? 0;
+    pt.consumedValue += bottle.purchasePrice;
+  }
+
+  const numericYears = [...yearMap.keys()]
+    .filter((y) => /^\d{4}$/.test(y))
+    .map(Number)
+    .sort((a, b) => a - b);
+  if (numericYears.length >= 2) {
+    const minY = numericYears[0];
+    const maxY = numericYears[numericYears.length - 1];
+    if (maxY - minY <= 20) {
+      for (let y = minY; y <= maxY; y += 1) {
+        ensureYear(String(y));
+      }
+    }
   }
 
   return {

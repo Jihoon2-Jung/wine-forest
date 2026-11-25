@@ -28,7 +28,7 @@ export function AppShell({ children }: { children: ReactNode }) {
       <div className="lg:pl-60">
         {/* R2 보강: 팝업 차단 없이 동기 클릭 제스처로 즉시 Google 재인증 + 대기 변경사항 업로드 */}
         {showReauthBanner && (
-          <div className="border-b border-[var(--status-warn)]/30 bg-[var(--status-warn)]/12 px-4 py-2.5">
+          <div className="border-b border-status-warn/30 bg-status-warn/[0.12] px-4 py-2.5">
             <div className="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-2 text-xs">
               <span className="font-medium text-primary">
                 {hasUnsyncedChanges
@@ -49,14 +49,16 @@ export function AppShell({ children }: { children: ReactNode }) {
           </div>
         )}
 
-        <main className="mx-auto max-w-7xl px-4 pt-4 pb-24 lg:px-8 lg:py-7">{children}</main>
+        <main className="mx-auto max-w-7xl px-4 pt-4 pb-[calc(8rem+env(safe-area-inset-bottom,0px))] lg:px-8 lg:py-7">
+          {children}
+        </main>
       </div>
 
       <FabButton />
       <BottomNav />
       <QuickAddModal />
       <ConflictModal />
-      <ToastBar />
+      <ToastBar hasSidebar />
     </div>
   );
 }

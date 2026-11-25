@@ -1,7 +1,7 @@
 # JH Wine Forest — 모바일(iOS 중심 + 공통/Android 선행) 개발 작업지시서 (`SPEC_MOBILE_IOS.md`)
 
 > **문서 안내:** 본 문서는 [MOBILE_IMPLEMENTATION_PLAN.md](./MOBILE_IMPLEMENTATION_PLAN.md)의 세부 실행 명세서입니다.
-> - **상태:** **M1~M4 코드/CI 준비 완료 (Mac·iOS 범위) — `GoogleSignIn-iOS` SPM 연결 · `App.xcscheme` · GitHub Actions(`xcode-27`) `.ipa` 빌드 워크플로 구성 완료 (Android 코드 미구현 · Windows PC 별도 진행)**
+> - **상태:** **M1~M4 완료 + M5 iOS 전수 감사 안정화 패치 완료 (2026-11-26: Part A 46건 전량 반영 · `8개 스위트 / 55개 테스트` 통과 · `.ipa` 재빌드 후 최종 실기기 확인 대기 / Android는 Windows PC 별도 진행)**
 > Mac 환경에서 **공통 코드(`src/`) 리팩토링, iOS 네이티브(`ios/`) 구현, Android 선행 스캐폴딩(`android/`) 작성**까지 누락 없이 구현·검증할 수 있도록 상세 지침을 제공합니다.
 > Windows PC에서의 Android Keystore 생성 및 빌드는 [GUIDE_WIN_ANDROID.md](./GUIDE_WIN_ANDROID.md)로 이어집니다.
 
@@ -92,7 +92,7 @@ gradlew text eol=lf
 * **분기 기준:** `mode === 'capacitor'` (또는 `BUILD_TARGET === 'capacitor'`) — `--mode capacitor` 사용으로 Mac/Windows PowerShell 양쪽에서 동일하게 동작
 * **적용 규칙:**
   * `base`: `isCapacitorBuild ? './' : '/wine-forest/'`
-  * `plugins`: `VitePWA(...)`는 `!isCapacitorBuild`일 때만 포함 (`!isCapacitorBuild && VitePWA({...})`).
+  * `plugins`: `VitePWA(...)`는 `!isCapacitorBuild`일 때만 포함하며, Capacitor 빌드에서는 `transformIndexHtml`로 불필요한 Web GIS `<script src="https://accounts.google.com/gsi/client">`를 자동 제거합니다.
   * **이유:** WKWebView / Android WebView 내부에서 `capacitor://localhost` 또는 `https://localhost`로 로드될 때 서브경로(`/wine-forest/`)와 Workbox 서비스워커가 등록되면 정적 에셋 404 및 구버전 캐시 고착 문제가 발생합니다.
 
 ### 2.2 `capacitor.config.ts` 신규 작성
@@ -114,7 +114,7 @@ const config: CapacitorConfig = {
   },
   plugins: {
     StatusBar: {
-      overlaysWebView: false,
+      overlaysWebView: true,
     },
   },
 };
@@ -276,7 +276,7 @@ export interface AuthAdapter {
   * **네이티브:**
     1. `Filesystem.writeFile({ path: fileName, data: jsonText, directory: Directory.Cache, encoding: Encoding.UTF8 })`로 캐시 디렉터리에 임시 `.json` 파일 작성.
     2. `const { uri } = await Filesystem.getUri({ path: fileName, directory: Directory.Cache });`로 파일 URI 획득.
-    3. `await Share.share({ title: 'JH Wine Forest 백업 내보내기', text: fileName, url: uri, dialogTitle: 'wine_db.json 내보내기' });` 호출 → iOS 공유 시트(파일 앱에 저장/AirDrop)/Android 공유 시트 오픈.
+    3. `await Share.share({ title: 'JH Wine Forest 백업 내보내기', url: uri, dialogTitle: 'wine_db.json 내보내기' });` 호출 → iOS 공유 시트(파일 앱에 저장 시 불필요한 `text.txt` 중복 생성을 막기 위해 `text`는 생략하고 `url`만 전달)/Android 공유 시트 오픈.
 
 ### 4.3 Android 하드웨어 · 제스처 뒤로가기 처리 (`initAndroidBackButton`)
 * **라이브러리:** `@capacitor/app`
@@ -507,7 +507,7 @@ Intel Mac에서는 Xcode 27(Apple Silicon 전용) 설치가 불가능하므로, 
 | 마일스톤 | 선행 조건 | 작업 범위 | 자가 검증 명령 및 통과 기준 |
 | :---: | :---: | :--- | :--- |
 | **M1** | 없음 | `.gitignore`, `.gitattributes`, `package.json`, `vite.config.ts`, `capacitor.config.ts` | `npm run build` (`dist/sw.js` 생성 + `/wine-forest/`) 및 `npm run build:mobile` (`dist/sw.js` 미생성 + `./`) 모두 성공 |
-| **M2** | M1 | `googleDriveAuth.ts`, `src/services/auth/*`, `nativeBridge.ts`, `googleDriveAdapter.ts`, `useWineStore.ts`, `photoPicker.ts`(`@capacitor/camera` 분기 연결), UI(`BottomSheet`, `AppShell`, `OnboardingView`, `SettingsPage`), `tests/authAdapter.test.ts` | `npm run typecheck` (에러 0건), `npm run test` (기존 6개 스위트 + `authAdapter.test.ts` 전체 100% 통과) |
+| **M2** | M1 | `googleDriveAuth.ts`, `src/services/auth/*`, `nativeBridge.ts`, `googleDriveAdapter.ts`, `useWineStore.ts`, `photoPicker.ts`(`@capacitor/camera` 분기 연결), UI(`BottomSheet`, `ConfirmDialog`, `AppShell`, `OnboardingView`, `SettingsPage`), `tests/authAdapter.test.ts`, `tests/auditFixes.test.tsx` | `npm run typecheck` (에러 0건), `npm run test` (전체 **8개 스위트 / 55개 테스트** 100% 통과) |
 | **M3** | M2 | `npx cap add ios --packagemanager SPM`, `npx cap add android`, `ios/` Swift 플러그인·`Local.xcconfig.example`, `android/` Kotlin 플러그인·`MainActivity`·`build.gradle` 작성 후 Git 커밋·푸시 | `npx cap sync android` 성공, `git status`에 개인 설정/키스토어 미포함 확인 |
 | **M4** | **Xcode 설치** | Xcode 초기 세팅, `GoogleSignIn-iOS` SPM 연결, `Local.xcconfig` 작성, Google Cloud iOS Client 추가 및 프로덕션 게시 | `xcodebuild -project ios/App/App.xcodeproj -scheme App -sdk iphonesimulator build` 에러 0건 |
 | **M5** | M4 + iPhone | 무료 Personal Team으로 iPhone 실기기 USB 설치 및 실사용 E2E 검증 | ① 최초 1회 로그인 후 `wine_db.json` 로드 ② 앱 강제 종료 후 재실행 시 로그인 팝업 없이 자동 동기화 ③ JSON 공유 시트 정상 동작 ④ 다크/라이트 상태바 전환 정상 |
@@ -528,8 +528,17 @@ Intel Mac에서는 Xcode 27(Apple Silicon 전용) 설치가 불가능하므로, 
 1. **라벨 / 시음 사진 카메라 연동 (`@capacitor/camera`):**
    * M1 패키지 설치 시 `@capacitor/camera`를 함께 설치합니다.
    * **단일 연동 지점:** 모든 UI(`WineDetailSheet`, `QuickConsumeModal`, `HistoryCard`)는 이미 [photoPicker.ts](../src/services/media/photoPicker.ts)의 `pickImageFile(options)`로 단일화되어 있으며, 스토어(`uploadWineLabelPhoto` / `uploadTastingPhoto`)도 `Blob`을 직접 수용합니다. **UI 파일은 수정하지 말고 `src/services/media/photoPicker.ts` 상단의 `NEXT AGENT HANDOFF` 주석대로 `Capacitor.isNativePlatform()` 분기만 추가**하십시오. (반환된 `Blob`은 `imageProcessor.ts`에서 자동 500px/1024px WebP 압축 후 `StorageAdapter.uploadPhoto()`로 저장됨)
-   * **`ios/App/App/Info.plist` 필수 권한 키 추가** *(미등록 시 iOS 실기기 카메라/앨범 호출 시 크래시)*:
+   * **`ios/App/App/Info.plist` 필수 권한 키 3종 추가** *(미등록 시 `@capacitor/camera@8`의 `checkUsageDescriptions()`가 `saveToGallery: false`/앨범 선택 시에도 즉시 reject하여 iOS 카메라/앨범이 동작하지 않음)*:
      * `NSCameraUsageDescription`: `"와인 라벨 및 시음 사진을 촬영해 셀러에 저장하기 위해 카메라 접근 권한이 필요합니다."`
      * `NSPhotoLibraryUsageDescription`: `"앨범에서 와인 라벨 및 시음 사진을 선택해 등록하기 위해 사진 라이브러리 접근 권한이 필요합니다."`
+     * `NSPhotoLibraryAddUsageDescription`: `"촬영한 와인 라벨 및 시음 사진을 처리하기 위해 사진 라이브러리 쓰기 권한 설명이 필요합니다."` *(반영 완료 ✅)*
 2. **음용적기 OS 로컬 알림 (`@capacitor/local-notifications`, 채택 시):**
    * 무료 Apple ID(Personal Team)는 원격 푸시(APNs)를 지원하지 않으므로 OS 알림을 제공할 경우 `@capacitor/local-notifications`를 추가해 앱 내 음용적기 순수 함수와 연결하고, 최초 알림 설정 시 `requestPermissions()`를 요청합니다.
+3. **M5 실기기 전수 감사 반영 완료 내역 (2026-11-26 반영 완료 ✅):**
+   * `capacitor.config.ts` / `ios/App/App/capacitor.config.json`: `StatusBar.overlaysWebView: true` 적용(라이트모드 검은 상태바 방지).
+   * `nativeBridge.ts`: `Share.share` 호출 시 `text` 제거(`url`만 전달해 iOS `text.txt` 중복 생성 차단) 및 `syncStatusBar` 방어 호출.
+   * `GoogleDriveAuthPlugin.swift`: `restoreSession`/`getAccessToken`/`signOut` `DispatchQueue.main.async` 직렬화, `isClientIdConfigured()`에서 `CFBundleURLSchemes` 일치 검증, `SCOPE_DENIED` 시 `signOut()` 정리.
+   * `SceneDelegate.swift`: `willConnectTo` 콜드스타트 URL 전달 및 `openURLContexts` 다중 URL 순회 처리.
+   * `ConfirmDialog.tsx`: 전 화면 `window.confirm`을 React `<ConfirmDialog>`로 전면 교체(iOS `WKWebView` `presentedViewController` 충돌 크래시 방지).
+   * `Info.plist` / `photoPicker.ts`: `CFBundleDevelopmentRegion: ko` + `CFBundleLocalizations`(`ko`, `en`) 및 카메라 시트 한글 `promptLabel*` 적용.
+   * `vite.config.ts` / `.github/workflows/ios-ipa.yml`: Capacitor 빌드 Web GIS `<script>` 자동 제거, `bundle_id` 정규식 및 `REVERSED_ID` 일치 CI 검증 추가.

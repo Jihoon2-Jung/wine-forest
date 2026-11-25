@@ -51,8 +51,29 @@ export function QuickConsumeModal({
   latestFifoRef.current = fifoBottles;
   const wineId = wine?.id ?? null;
 
+  // 언마운트·닫힘·와인 전환 시 저장되지 않은 업로드 사진 고아 정리 (M18)
+  const uncommittedPhotosRef = useRef<string[]>([]);
+  const sessionTokenRef = useRef(0);
+  const deletePhotoRef = useRef(deleteTastingPhotoFile);
+  deletePhotoRef.current = deleteTastingPhotoFile;
+
+  const cleanupUncommittedPhotos = () => {
+    if (uncommittedPhotosRef.current.length === 0) return;
+    const toDelete = uncommittedPhotosRef.current;
+    uncommittedPhotosRef.current = [];
+    for (const pid of toDelete) {
+      void deletePhotoRef.current(pid);
+    }
+  };
+
   useEffect(() => {
-    if (!open) return;
+    sessionTokenRef.current += 1;
+    if (!open) {
+      cleanupUncommittedPhotos();
+      setPhotoFileIds([]);
+      return;
+    }
+    cleanupUncommittedPhotos();
     setSelectedBottleId(initialBottleId ?? latestFifoRef.current[0]?.id ?? '');
     setEventType('CONSUMED');
     setEventDate(getTodayIsoDate());
@@ -64,6 +85,13 @@ export function QuickConsumeModal({
     setTastingNote('');
     setPhotoFileIds([]);
   }, [open, wineId, initialBottleId]);
+
+  useEffect(() => {
+    return () => {
+      sessionTokenRef.current += 1;
+      cleanupUncommittedPhotos();
+    };
+  }, []);
 
   // 모달이 열린 상태에서 외부 동기화로 현재 선택된 병만 사라진 경우, 입력 내용은 유지하고 병 ID만 보정
   useEffect(() => {
@@ -82,7 +110,7 @@ export function QuickConsumeModal({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedBottleId) return;
+    if (!selectedBottleId || submitting) return;
     setSubmitting(true);
     try {
       await consumeOrGiftBottle({
@@ -96,6 +124,7 @@ export function QuickConsumeModal({
         tastingNote,
         photoFileIds,
       });
+      uncommittedPhotosRef.current = [];
       onClose();
     } finally {
       setSubmitting(false);
@@ -104,9 +133,7 @@ export function QuickConsumeModal({
 
   const handleClose = () => {
     // 저장하지 않고 닫을 때 미리 업로드해 둔 시음 사진 고아 파일 정리
-    for (const pid of photoFileIds) {
-      void deleteTastingPhotoFile(pid);
-    }
+    cleanupUncommittedPhotos();
     setPhotoFileIds([]);
     onClose();
   };
@@ -295,13 +322,22 @@ export function QuickConsumeModal({
                       type="button"
                       disabled={uploadingPhoto}
                       onClick={async () => {
-                        if (photoFileIds.length >= 3) return;
+                        if (photoFileIds.length >= 3 || uploadingPhoto) return;
                         const blob = await pickImageFile({ preset: 'tasting' });
                         if (!blob) return;
+                        const tokenAtStart = sessionTokenRef.current;
                         setUploadingPhoto(true);
                         try {
                           const uploadedId = await uploadTastingPhoto(blob);
                           if (uploadedId) {
+                            if (sessionTokenRef.current !== tokenAtStart) {
+                              void deletePhotoRef.current(uploadedId);
+                              return;
+                            }
+                            uncommittedPhotosRef.current = [
+                              ...uncommittedPhotosRef.current,
+                              uploadedId,
+                            ];
                             setPhotoFileIds((prev) => [...prev, uploadedId]);
                           }
                         } finally {
@@ -322,6 +358,9 @@ export function QuickConsumeModal({
                         key={pid}
                         fileId={pid}
                         onRemove={() => {
+                          uncommittedPhotosRef.current = uncommittedPhotosRef.current.filter(
+                            (id) => id !== pid,
+                          );
                           setPhotoFileIds((prev) => prev.filter((id) => id !== pid));
                           void deleteTastingPhotoFile(pid);
                         }}

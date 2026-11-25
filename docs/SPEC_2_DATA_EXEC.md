@@ -227,8 +227,9 @@ python3 local_migration_script \
 2. **구조화된 시음노트 & 5.0 별점 (Phase 2-2 — 구현 완료):**
    * `TastingRecord`의 `rating`(5.0 만점, 0.5 단위), `tastingNote`, `companions` 입력·인라인 편집, 평점순 정렬/필터, 상세 시트 평균 별점 구현. (프라이버시 모드 ON 시에도 `tastingNote`·`companions`·`rating`은 표시, 기존 `memo`만 마스킹)
 3. **미디어 파이프라인 — 라벨 & 시음 사진 (Phase 2-3A & 2-3B — 구현 완료):**
-   * **2-3A (앱 내 촬영/업로드):** 클라이언트 Canvas 자동 압축(`imageProcessor.ts`: 라벨 500px / 시음 1024px WebP, JPEG 폴백), Drive `JH_Wine_Forest/photos/` + `LocalOnlyAdapter` IndexedDB `photoCache`(DB v2) 오프라인 캐시, `<WineThumbnail />` 실이미지, 라벨 등록/교체/삭제, 시음 사진(최대 3장) 첨부 및 `PhotoLightbox` 확대 뷰어 구현.
-   * **2-3B (기존 와인 라벨 일괄 검색·사용자 컨펌 도구):** `scripts/label_review_tool.py`로 **빈티지 구분 없이 `(와인명, 색상)` 단위로 통합**해 공개 API(Open Food Facts / Wikimedia Commons, 선택: `--local-dir`, `--google-cse-key`/`--google-cse-cx`, `--serpapi-key`) 후보 탐색 + 브라우저 검수 HTML(`label_review.html`: 후보 선택, 클립보드 `Cmd+V`, 드래그&드롭, 500px WebP 번들 `approved_labels.json` 내보내기) 생성 → 웹앱 **설정 → `[승인된 라벨 일괄 적용]`** 으로 `drive.file` 권한 내 일괄 업로드 및 동일 와인 전체 빈티지 공통 연결.
+   * **2-3A (앱 내 촬영/업로드):** 클라이언트 Canvas 자동 압축(`imageProcessor.ts`: 라벨 500px / 시음 1024px WebP, JPEG 폴백), Drive `JH_Wine_Forest/photos/` + `LocalOnlyAdapter` IndexedDB `photoCache`(DB v2) 오프라인 캐시, 스토어 `authRevision` 연동으로 재인증 시 미캐싱 Drive 사진 자동 재로딩, 삭제/복원/병합/초기화 시 미참조 고아 사진 정리, `<WineThumbnail />` 실이미지(`w-[52px] h-[74px]` 고정), 라벨 등록/교체/삭제, 시음 사진(최대 3장) 첨부 및 `PhotoLightbox` 확대 뷰어 구현.
+   * **2-3B (기존 와인 라벨 일괄 검색·사용자 컨펌 도구):** `scripts/label_review_tool.py`로 **빈티지 구분 없이 `(와인명, 색상)` 단위로 통합**해 공개 API(Open Food Facts / Wikimedia Commons, 선택: `--local-dir` 3자 미만 파일명 제외 및 500px WebP 압축 강제, `--google-cse-key`/`--google-cse-cx`, `--serpapi-key`) 후보 탐색 + 브라우저 검수 HTML(`label_review.html`: XSS 방어 DOM 바인딩, IndexedDB 대용량 자동 저장 및 용량 초과 경고 배너, 후보 선택, 클립보드 `Cmd+V`, 드래그&드롭, 500px WebP 번들 `approved_labels.json` 내보내기) 생성 → 웹앱 **설정 → `[승인된 라벨 일괄 적용]`** (3버튼 확인 모달 · 부분 라벨 그룹 1라벨 동기화 · 401/429 즉시 중단 및 완료분 커밋)으로 `drive.file` 권한 내 일괄 업로드 및 동일 와인 전체 빈티지 공통 연결.
+   * **스키마 & 검증 보강:** `wineMasterSchema`에 `drinkingWindowStart <= drinkingWindowEnd` 교차 검증, `wineDatabaseSchema`에 실달력 날짜 검증(`2025-02-31` 차단)·4개 테이블 중복 Primary Key 차단·`tasting.bottleId` 1:1 유일성 검증 추가 (`tastingRecordSchema.rating`은 `schemaVersion: 1` 하위호환을 위해 `0..100` 유지, UI에서 5점 초과 시 `점` 표기). `commitMutation()`은 상태/IndexedDB 쓰기 전에 Zod 검증을 선행하고 `mutationRevision` 기반 lazy snapshot 직렬화로 동시 쓰기 자가 충돌을 방지합니다.
 
 ---
 
@@ -239,7 +240,9 @@ python3 local_migration_script \
 wine-forest/
 ├── .github/
 │   └── workflows/
-│       └── deploy.yml              # GitHub Pages 자동 빌드·배포 (VITE_GOOGLE_CLIENT_ID Secret 주입)
+│       ├── deploy.yml              # GitHub Pages 자동 빌드·배포 (VITE_GOOGLE_CLIENT_ID Secret 주입)
+│       └── ios-ipa.yml             # Capacitor iOS 미서명 .ipa 자동 빌드 (xcode-27 러너)
+├── ios/                            # Capacitor 8 iOS 네이티브 프로젝트 (SPM + GoogleDriveAuthPlugin.swift)
 ├── public/
 │   ├── icons/                      # PWA 아이콘 (192x192, 512x512, apple-touch-icon)
 │   └── favicon.svg                 # JH Wine Forest 심볼 (포레스트 + 와인글라스 미니멀 SVG)
@@ -249,7 +252,7 @@ wine-forest/
 │   └── requirements.txt            # openpyxl
 ├── src/
 │   ├── components/
-│   │   ├── common/                 # PriceText(FxNoteText·MemoText 포함), WineColorBadge, WineThumbnail, StarRating, PhotoLightbox, BottomSheet, ConflictModal, SyncBadge, ToastBar
+│   │   ├── common/                 # PriceText(FxNoteText·MemoText 포함), WineColorBadge, WineThumbnail, StarRating, PhotoLightbox, BottomSheet(공용 모달 스택), ConfirmDialog, ConflictModal, SyncBadge, ToastBar
 │   │   ├── layout/                 # AppShell, TopHeader, BottomNav, DesktopSidebar, FabButton
 │   │   ├── wines/                  # WineGroupCard, WineDetailSheet, BottleRow, FilterBar, QuickAddModal, QuickConsumeModal
 │   │   ├── cellar/                 # ShelfCard, ShelfDetailDrawer, MoveBottlePicker, ShelfConfigModal (배치도는 CellarMapPage 통합)
@@ -262,8 +265,11 @@ wine-forest/
 │   │   ├── StatsPage.tsx           # 탭 4 (React.lazy 분리 + 음용 적기 현황 카드)
 │   │   ├── SettingsPage.tsx        # 설정/백업/임포트/로컬↔Drive 모드 전환
 │   │   └── OnboardingView.tsx      # 최초 실행 (Google Drive / 로컬 테스트 / JSON Import)
+│   ├── plugins/
+│   │   └── googleDriveAuth.ts      # Capacitor 네이티브 GoogleDriveAuth 플러그인 TS 브릿지
 │   ├── services/
-│   │   ├── auth/googleAuth.ts      # GIS OAuth 토큰 관리 (Lazy Auth, 1클릭 동기 재인증)
+│   │   ├── auth/                   # googleAuth 파사드, webGisAuthAdapter, nativeGoogleAuthAdapter, types
+│   │   ├── native/nativeBridge.ts  # iOS/Android 상태바 연동 & 네이티브 JSON 공유 시트 브릿지
 │   │   ├── domain/
 │   │   │   ├── wineHelpers.ts      # 4중 키 매칭, 3단계 산지 포맷, 음용 적기 판정, FIFO/빈티지 정렬
 │   │   │   └── drinkingWindowEstimator.ts # 지역·등급·색상·빈티지 작황 기반 음용 적기 자동 추천 엔진
@@ -298,11 +304,18 @@ wine-forest/
 │   ├── schemaValidation.test.ts    # Zod 스키마 및 FK 무결성 검증
 │   ├── syncConflict.test.ts        # Mock StorageAdapter 기반 충돌 감지·단건 메타 조회·주 1회 백업·안전 복원 검증
 │   ├── wineStore.test.ts           # 4중 키 병합·고아 마스터 정리·선반 이름/삭제·deviceLabel·소비/복원 검증
-│   └── phase2.test.tsx             # Phase 2 음용 적기·5점 별점/시음노트·프라이버시 2-A·이미지 리사이징 검증
+│   ├── phase2.test.tsx             # Phase 2 음용 적기·별점/시음노트·이미지 리사이징·라벨 일괄 적용·안정화 회귀 검증
+│   ├── authAdapter.test.ts         # 웹 GIS 호환·네이티브 무음 복원·401 재시도·동시 갱신 dedupe 검증
+│   └── auditFixes.test.tsx         # 전수 감사 회귀 검증(스키마·도메인·통계·동시성·복원·모달스택·프라이버시·스테일상태)
 ├── docs/
-│   ├── SPEC_1_UI_ARCH.md           # 작업지시서 1부
-│   ├── SPEC_2_DATA_EXEC.md         # 작업지시서 2부
-│   └── IMPLEMENTATION_PLAN.md      # 최종 구현 계획 및 완료 명세
+│   ├── SPEC_1_UI_ARCH.md           # 웹 작업지시서 1부
+│   ├── SPEC_2_DATA_EXEC.md         # 웹 작업지시서 2부
+│   ├── IMPLEMENTATION_PLAN.md      # 최종 구현 계획·완료 명세·안정화/감사 현황
+│   ├── MOBILE_IMPLEMENTATION_PLAN.md # 모바일(iOS/Android) 마스터 계획
+│   ├── SPEC_MOBILE_IOS.md          # Mac·iOS 개발 작업지시서
+│   └── GUIDE_WIN_ANDROID.md        # Windows Android 빌드 실전 가이드
+├── capacitor.config.ts             # Capacitor 8 모바일 앱 설정
+├── AGENTS.md                       # 워크스페이스 에이전트 규칙 (코드 수정 시 docs/ 자동 동기화)
 ├── .env.example                    # VITE_GOOGLE_CLIENT_ID=your-client-id.apps.googleusercontent.com
 ├── .gitignore
 ├── index.html                      # GIS client script + Pretendard font + PWA meta
@@ -368,7 +381,7 @@ Antigravity(Gemini Neon)는 아래 **6개 마일스톤**을 순서대로 완료�
 
 ## 10. 최종 완료 기준 (Definition of Done — 검증 완료)
 
-- [x] `npm run test` 모든 단위 테스트(스키마, 230218 통계·3단계 산지, 충돌 감지·주 1회 백업, 프라이버시 마스킹, 스토어 도메인 변이, Phase 2 음용 적기 자동 추천·별점/시음노트·이미지 리사이징·단일 사진 피커·라벨 일괄 적용) 100% 통과 (6 suites / 28 tests)
+- [x] `npm run test` 모든 단위 테스트(스키마, 230218 통계·3단계 산지, 충돌 감지·주 1회 백업, 프라이버시 마스킹, 스토어 도메인 변이, Phase 2·안정화 회귀, 웹/네이티브 인증 어댑터, 전수 감사 회귀) 100% 통과 (**8 suites / 55 tests**)
 - [x] `npm run build` TypeScript/Vite 에러 및 경고 없이 완료, PWA 서비스워커(`dist/sw.js`) 정상 생성
 - [x] 모바일(`390×844`)과 데스크톱(`1440×900`) 양쪽에서 라이트/다크 모드 모두 대비·가독성 결함 없음 (화이트 연노랑 `#F3EED4`/`#EFEAD0` 다크 텍스트 대비 포함)
 - [x] 프라이버시 토글(`👁️`) ON 시 앱 내 모든 페이지·모달·외화 메모(`<FxNoteText />`)·비고/메모 원문(`<MemoText />`)·차트(가격대 분포 오버레이 포함)에서 금액 정보 100% 마스킹 확인
