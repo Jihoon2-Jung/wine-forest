@@ -1,7 +1,7 @@
 # JH Wine Forest — 모바일(iOS 중심 + 공통/Android 선행) 개발 작업지시서 (`SPEC_MOBILE_IOS.md`)
 
 > **문서 안내:** 본 문서는 [MOBILE_IMPLEMENTATION_PLAN.md](./MOBILE_IMPLEMENTATION_PLAN.md)의 세부 실행 명세서입니다.
-> - **상태:** **M1~M4 완료 + M5 iOS 전수 감사 안정화 패치 완료 (2026-11-26: Part A 46건 전량 반영 · `8개 스위트 / 55개 테스트` 통과 · `.ipa` 재빌드 후 최종 실기기 확인 대기 / Android는 Windows PC 별도 진행)**
+> - **상태:** **M1~M6 완료 + iOS·Android 전수 감사 안정화 패치 완료 (2026-11-26: Part A 46건 + Android/공통 감사 10건 전량 반영 · `8개 스위트 / 59개 테스트` 통과 · iOS `.ipa` 재빌드 확인 + Android `v1.0.1 / versionCode 2` Release APK 실기기 설치 완료, Windows Android 작업은 `feat/android-v1` 브랜치 분리 푸시)**
 > Mac 환경에서 **공통 코드(`src/`) 리팩토링, iOS 네이티브(`ios/`) 구현, Android 선행 스캐폴딩(`android/`) 작성**까지 누락 없이 구현·검증할 수 있도록 상세 지침을 제공합니다.
 > Windows PC에서의 Android Keystore 생성 및 빌드는 [GUIDE_WIN_ANDROID.md](./GUIDE_WIN_ANDROID.md)로 이어집니다.
 
@@ -115,6 +115,10 @@ const config: CapacitorConfig = {
   plugins: {
     StatusBar: {
       overlaysWebView: true,
+    },
+    SystemBars: {
+      insetsHandling: 'css',
+      initialViewportFitValueHint: 'cover',
     },
   },
 };
@@ -385,19 +389,22 @@ Capacitor 8에서 앱 내부에 직접 둔 Swift 플러그인은 외부 npm 패�
 
 ---
 
-## 6. Android 선행 스캐폴딩 & Kotlin 플러그인 명세 (`android/` — Mac 선행 작성분)
+## 6. Android 스캐폴딩 & Kotlin 플러그인 명세 (`android/` — Windows PC 구현·검증 완료)
 
-Windows PC에서 `git pull` 후 바로 빌드만 진행할 수 있도록 Mac에서 아래 작업을 완료해 커밋합니다.
+Windows PC(JDK 21 + Android API 36)에서 `feat/android-v1` 브랜치로 구현·실기기 검증을 완료했습니다.
 
-### 6.1 플랫폼 생성 및 Gradle 구성
-1. `npx cap add android` 실행.
+### 6.1 플랫폼 생성 및 Gradle/Manifest 구성
+1. `npx cap add android` 실행 (`compileSdkVersion = 36`, `targetSdkVersion = 36`, `minSdkVersion = 24`, `versionCode 2`, `versionName "1.0.1"`).
 2. **`android/app/build.gradle` 수정:**
-   * `plugins`에 `id 'org.jetbrains.kotlin.android'` 확인/추가 (Capacitor 8 Android 템플릿 기본 언어 확인 후 Kotlin 컴파일 지원 설정).
+   * `plugins`에 `apply plugin: 'kotlin-android'` 적용 (`android/build.gradle` `kotlin_version = '2.2.20'`, `compileOptions`/`kotlinOptions` Java 21 정렬).
    * `dependencies`에 Google Play Services Auth 추가:
      ```groovy
      implementation 'com.google.android.gms:play-services-auth:22.0.0'
      ```
-   * **조건부 Release Keystore 서명 설정:** `android/keystore.properties` 파일이 존재할 때만 `signingConfigs.release`를 로드하도록 작성해, 키스토어가 없는 CI/Mac 환경이나 Debug 빌드 시 Gradle 오류가 나지 않게 방어합니다.
+   * **조건부 Release Keystore 서명 설정:** `android/keystore.properties` 파일이 존재할 때만 `signingConfigs.release`를 로드하도록 작성(`file(keystoreProperties['storeFile'])`로 절대경로 지원)해, 키스토어가 없는 CI/Mac 환경이나 Debug 빌드 시 Gradle 오류가 나지 않게 방어합니다.
+3. **`android/app/src/main/AndroidManifest.xml`:**
+   * `android:allowBackup="false"` 설정(OS Auto Backup이 토큰 없는 오래된 `SharedPreferences` 플래그만 복원하는 불일치 차단).
+   * Phase 2 카메라 촬영용 `<uses-permission android:name="android.permission.CAMERA" />` 및 `<uses-feature android:name="android.hardware.camera" android:required="false" />` 추가.
 
 ### 6.2 `GoogleDriveAuthPlugin.kt` 구현 명세
 위치: `android/app/src/main/java/com/jihoon/wineforest/GoogleDriveAuthPlugin.kt`
@@ -405,23 +412,18 @@ Windows PC에서 `git pull` 후 바로 빌드만 진행할 수 있도록 Mac에�
 * **핵심 API:** `com.google.android.gms.auth.api.identity.Identity.getAuthorizationClient(...)`
 * **Scope:** `com.google.android.gms.common.api.Scope("https://www.googleapis.com/auth/drive.file")`
 * **구현 세부 사항:**
-  1. **`load()` 오버라이드 (ActivityResultLauncher 등록):**
-     * Deprecated된 `startIntentSenderForResult` 대신 Modern AndroidX Activity Result API 사용:
-       ```kotlin
-       authLauncher = bridge.registerForActivityResult(
-           ActivityResultContracts.StartIntentSenderForResult()
-       ) { result -> handleAuthorizationResult(result) }
-       ```
-     * 진행 중인 `PluginCall`을 `pendingAuthCall`에 보관했다가 콜백에서 `Identity.getAuthorizationClient(activity).getAuthorizationResultFromIntent(result.data)`로 `accessToken` 추출 후 `resolve` (취소 시 `"USER_CANCELLED"` reject).
+  1. **`load()` 오버라이드 (`ActivityResultLauncher` & 영속 이메일 복원):**
+     * `SharedPreferences`(`jh_wine_forest_auth`)에서 `PREF_ACCOUNT_EMAIL`을 복원해 재시작 후에도 `lastAccount`가 유지되게 합니다.
+     * Deprecated된 `startIntentSenderForResult` 대신 `bridge.registerForActivityResult(ActivityResultContracts.StartIntentSenderForResult())`를 등록하고, `signIn()` 시 `bridge.saveCall(call)` + `pendingAuthCallId`로 생명주기를 관리해 저메모리 Activity 재생성에도 안전하게 대응합니다.
   2. **`authorize` 기반 `signIn` / `restoreSession` / `getAccessToken`:**
      * `AuthorizationRequest.builder().setRequestedScopes(listOf(driveScope)).build()` 생성.
-     * `signIn`: `authorizationResult.hasResolution()`이 `true`이면 `IntentSenderRequest.Builder(pendingIntent.intentSender).build()`로 `authLauncher.launch(...)` 실행, `false`이면 즉시 `accessToken` 반환.
+     * `signIn`: `authorizationResult.hasResolution()`이 `true`이면 UI 스레드(`currentActivity.runOnUiThread`)에서 `authLauncher.launch(...)` 실행, `false`이면 즉시 `accessToken` 반환.
      * `restoreSession` / `getAccessToken`:
-       * `forceRefresh == true`이고 마지막 `lastAccessToken`이 있으면 먼저 `Identity.getAuthorizationClient(context).clearToken(ClearTokenRequest.builder().setToken(lastToken).build())`를 호출한 뒤 `authorize()`를 실행합니다.
-       * `authorize()` 결과 `hasResolution() == false`이면 **UI 팝업 없이 새 `accessToken`을 즉시 반환**합니다.
-       * 만약 `hasResolution() == true`라면(최초 로그인 전이거나 사용자가 권한을 철회한 상태), 무음 복원/무음 갱신에서는 UI를 강제로 띄우지 않고 `"SESSION_EXPIRED"`(또는 `restoreSession`의 미로그인 응답)를 반환해 앱 부팅 시 팝업이 튀어나오는 것을 막습니다.
+       * `forceRefresh == true`이고 마지막 `lastAccessToken`이 있으면 먼저 `clearToken(...)`을 호출한 뒤 `authorize()`를 실행합니다.
+       * 오프라인/일시 네트워크 단절(`CommonStatusCodes.NETWORK_ERROR` / `TIMEOUT` / `INTERRUPTED`) 실패 시에는 `"SESSION_EXPIRED"` 대신 `"NETWORK_ERROR"`로 reject해 `NativeGoogleAuthAdapter`가 오프라인 세션을 보존하도록 합니다.
+       * 권한 재동의가 필요한 경우(`hasResolution() == true`) 무음 복원/갱신에서는 팝업을 띄우지 않고 `"SESSION_EXPIRED"`(또는 `restoreSession`의 `signedIn: false`)를 반환합니다.
   3. **`signOut`:**
-     * `lastAccessToken`이 있으면 `clearToken(...)` 호출 및 `lastAccount`가 있는 경우에만 `Identity.getAuthorizationClient(activity).revokeAccess(RevokeAccessRequest.builder().setAccount(account).setScopes(listOf(driveScope)).build())` 실행 후 `resolve()`. (빈 `RevokeAccessRequest` 호출 시 런타임 예외가 나므로 계정 존재 시에만 안전 호출)
+     * `SharedPreferences`의 `signed_in`·`account_email` 초기화 후, `lastAccessToken`이 있으면 `clearToken(...)` 호출, `lastAccount`(또는 영속 이메일로 복원한 `Account(email, "com.google")`)가 있으면 `revokeAccess(...)`를 안전 호출하고 `resolve()`.
 
 ### 6.3 `MainActivity` 플러그인 등록 (순서 엄수!)
 위치: `android/app/src/main/java/com/jihoon/wineforest/MainActivity.kt` (또는 `.java` 템플릿 유지 시 Java/Kotlin 선택)
@@ -507,7 +509,7 @@ Intel Mac에서는 Xcode 27(Apple Silicon 전용) 설치가 불가능하므로, 
 | 마일스톤 | 선행 조건 | 작업 범위 | 자가 검증 명령 및 통과 기준 |
 | :---: | :---: | :--- | :--- |
 | **M1** | 없음 | `.gitignore`, `.gitattributes`, `package.json`, `vite.config.ts`, `capacitor.config.ts` | `npm run build` (`dist/sw.js` 생성 + `/wine-forest/`) 및 `npm run build:mobile` (`dist/sw.js` 미생성 + `./`) 모두 성공 |
-| **M2** | M1 | `googleDriveAuth.ts`, `src/services/auth/*`, `nativeBridge.ts`, `googleDriveAdapter.ts`, `useWineStore.ts`, `photoPicker.ts`(`@capacitor/camera` 분기 연결), UI(`BottomSheet`, `ConfirmDialog`, `AppShell`, `OnboardingView`, `SettingsPage`), `tests/authAdapter.test.ts`, `tests/auditFixes.test.tsx` | `npm run typecheck` (에러 0건), `npm run test` (전체 **8개 스위트 / 55개 테스트** 100% 통과) |
+| **M2** | M1 | `googleDriveAuth.ts`, `src/services/auth/*`, `nativeBridge.ts`, `googleDriveAdapter.ts`, `useWineStore.ts`, `photoPicker.ts`(`@capacitor/camera` 분기 연결), UI(`BottomSheet`, `ConfirmDialog`, `AppShell`, `OnboardingView`, `SettingsPage`), `tests/authAdapter.test.ts`, `tests/auditFixes.test.tsx` | `npm run typecheck` (에러 0건), `npm run test` (전체 **8개 스위트 / 59개 테스트** 100% 통과) |
 | **M3** | M2 | `npx cap add ios --packagemanager SPM`, `npx cap add android`, `ios/` Swift 플러그인·`Local.xcconfig.example`, `android/` Kotlin 플러그인·`MainActivity`·`build.gradle` 작성 후 Git 커밋·푸시 | `npx cap sync android` 성공, `git status`에 개인 설정/키스토어 미포함 확인 |
 | **M4** | **Xcode 설치** | Xcode 초기 세팅, `GoogleSignIn-iOS` SPM 연결, `Local.xcconfig` 작성, Google Cloud iOS Client 추가 및 프로덕션 게시 | `xcodebuild -project ios/App/App.xcodeproj -scheme App -sdk iphonesimulator build` 에러 0건 |
 | **M5** | M4 + iPhone | 무료 Personal Team으로 iPhone 실기기 USB 설치 및 실사용 E2E 검증 | ① 최초 1회 로그인 후 `wine_db.json` 로드 ② 앱 강제 종료 후 재실행 시 로그인 팝업 없이 자동 동기화 ③ JSON 공유 시트 정상 동작 ④ 다크/라이트 상태바 전환 정상 |
