@@ -1,0 +1,338 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#1B4332" />
+    <title>개인정보처리방침 | JH Wine Forest</title>
+    <link rel="icon" type="image/svg+xml" href="./favicon.svg" />
+    <style>
+      :root {
+        --bg: #faf9f6;
+        --surface: #ffffff;
+        --text: #1c2420;
+        --muted: #526058;
+        --border: #e3e7e3;
+        --accent: #1b4332;
+        --accent-soft: #e9f2ed;
+      }
+
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --bg: #0d1411;
+          --surface: #151f1b;
+          --text: #eef3f0;
+          --muted: #9fb0a7;
+          --border: #25342d;
+          --accent: #52b788;
+          --accent-soft: #172b22;
+        }
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        padding: 2rem 1rem 4rem;
+        background: var(--bg);
+        color: var(--text);
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Apple SD Gothic Neo",
+          "Malgun Gothic", sans-serif;
+        line-height: 1.7;
+      }
+
+      main {
+        max-width: 780px;
+        margin: 0 auto;
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: 16px;
+        padding: 2rem 1.75rem;
+      }
+
+      header {
+        border-bottom: 1px solid var(--border);
+        padding-bottom: 1.25rem;
+        margin-bottom: 1.75rem;
+      }
+
+      .eyebrow {
+        display: inline-block;
+        font-size: 0.8rem;
+        font-weight: 600;
+        color: var(--accent);
+        background: var(--accent-soft);
+        padding: 0.2rem 0.65rem;
+        border-radius: 999px;
+        margin-bottom: 0.75rem;
+      }
+
+      h1 {
+        margin: 0 0 0.4rem;
+        font-size: 1.65rem;
+        line-height: 1.3;
+      }
+
+      .meta {
+        margin: 0;
+        color: var(--muted);
+        font-size: 0.9rem;
+      }
+
+      h2 {
+        margin: 2rem 0 0.65rem;
+        font-size: 1.15rem;
+        color: var(--accent);
+      }
+
+      p,
+      li {
+        font-size: 0.96rem;
+      }
+
+      ul {
+        padding-left: 1.25rem;
+        margin: 0.5rem 0 1rem;
+      }
+
+      li {
+        margin-bottom: 0.4rem;
+      }
+
+      code {
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        font-size: 0.88em;
+        background: var(--accent-soft);
+        padding: 0.12rem 0.4rem;
+        border-radius: 6px;
+        word-break: break-all;
+      }
+
+      a {
+        color: var(--accent);
+        text-decoration: underline;
+        text-underline-offset: 2px;
+      }
+
+      .callout {
+        background: var(--accent-soft);
+        border-left: 4px solid var(--accent);
+        padding: 0.9rem 1rem;
+        border-radius: 8px;
+        margin: 1rem 0;
+      }
+
+      .divider {
+        border: 0;
+        border-top: 1px solid var(--border);
+        margin: 2.5rem 0 1.75rem;
+      }
+
+      .footer {
+        margin-top: 2rem;
+        padding-top: 1.25rem;
+        border-top: 1px solid var(--border);
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: space-between;
+        gap: 0.75rem;
+        font-size: 0.9rem;
+        color: var(--muted);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <header>
+        <span class="eyebrow">JH Wine Forest</span>
+        <h1>개인정보처리방침 (Privacy Policy)</h1>
+        <p class="meta">시행일 및 최종 수정일: 2026년 11월 25일</p>
+      </header>
+
+      <p>
+        <strong>JH Wine Forest</strong>(웹 애플리케이션 및 iOS/Android 모바일 앱, 이하 "본 앱")는
+        사용자의 와인 셀러 재고, 선반 배치, 소비·선물 이력 및 시음 기록을 관리하기 위한 개인용
+        애플리케이션입니다. 본 앱은 별도의 외부 운영 서버나 중앙 데이터베이스를 두지 않으며,
+        사용자의 개인정보와 데이터를 안전하게 보호하기 위해 아래와 같은 방침을 준수합니다.
+      </p>
+
+      <h2>1. 수집 및 접근하는 데이터</h2>
+      <p>본 앱은 사용자가 직접 Google 계정으로 연결을 승인한 경우에 한해 아래 정보에 접근합니다.</p>
+      <ul>
+        <li>
+          <strong>Google 계정 인증 정보:</strong> Google OAuth 인증을 통해 발급되는 액세스 토큰 및
+          로그인 계정 표시용 기본 프로필(이메일 주소). 토큰은 사용자 기기의 브라우저 메모리 또는
+          운영체제 보안 저장소(Google 공식 SDK)에서만 처리되며 개발자 서버로 전송되지 않습니다.
+        </li>
+        <li>
+          <strong>Google Drive 앱 생성 파일(최소 권한 스코프):</strong>
+          <code>https://www.googleapis.com/auth/drive.file</code> 권한만 요청합니다. 이 권한은
+          <strong>본 앱이 생성했거나 사용자가 본 앱을 통해 직접 선택한 파일</strong>에만 제한적으로
+          접근하며, 사용자의 다른 Google Drive 파일이나 폴더는 읽거나 수정할 수 없습니다.
+          <ul>
+            <li><code>JH_Wine_Forest/wine_db.json</code> (와인 재고, 선반 배치, 소비·시음 기록)</li>
+            <li><code>JH_Wine_Forest/photos/</code> (사용자가 등록한 와인 라벨 및 시음 사진)</li>
+            <li><code>JH_Wine_Forest/backups/</code> (자동·수동 JSON 백업 스냅샷)</li>
+          </ul>
+        </li>
+        <li>
+          <strong>기기 로컬 저장소(IndexedDB):</strong> 빠른 조회와 오프라인 사용을 위해 사용자
+          기기의 로컬 캐시(IndexedDB)에 와인 목록과 사진 캐시를 저장합니다.
+        </li>
+        <li>
+          <strong>카메라 및 사진 보관함(선택):</strong> 사용자가 와인 라벨 또는 시음 사진을 직접
+          촬영·선택할 때만 일시적으로 접근하며, 기기 내에서 압축한 뒤 사용자 본인의 Google Drive에만
+          저장합니다.
+        </li>
+      </ul>
+
+      <h2>2. 데이터의 이용 목적</h2>
+      <ul>
+        <li>사용자의 개인 와인 셀러 재고, 선반 배치, 통계 및 소비 이력 관리 기능 제공</li>
+        <li>사용자 본인의 PC 웹 및 모바일 기기(iOS/Android) 간 Google Drive 기반 데이터 동기화</li>
+        <li>오프라인 캐시 제공 및 데이터 손실 방지를 위한 사용자 본인 Drive 내 백업 생성</li>
+      </ul>
+
+      <h2>3. 데이터의 보관, 제3자 제공 및 공유 금지</h2>
+      <ul>
+        <li>
+          모든 와인 데이터와 사진은 오직 <strong>사용자 본인의 기기(IndexedDB)</strong>와
+          <strong>사용자 본인의 Google Drive</strong>에만 저장됩니다.
+        </li>
+        <li>
+          본 앱은 별도의 백엔드 서버, 광고 SDK, 제3자 트래커를 사용하지 않으며, 사용자 데이터를
+          제3자에게 판매, 대여, 전송 또는 공유하지 않습니다.
+        </li>
+        <li>
+          Google API를 통해 접근한 데이터는 광고 타게팅, 데이터 브로커 제공, 또는 범용 인공지능(AI)·머신러닝(ML)
+          모델 학습에 일절 사용되지 않습니다.
+        </li>
+      </ul>
+
+      <h2>4. Google API 서비스 사용자 데이터 정책 준수 (Limited Use)</h2>
+      <div class="callout">
+        <p style="margin: 0">
+          본 앱이 Google API로부터 전달받은 정보의 사용 및 타 앱으로의 전송은
+          <a
+            href="https://developers.google.com/terms/api-data-user-data-policy"
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            Google API Services User Data Policy</a
+          >(제한적 사용 요구사항, Limited Use requirements 포함)를 준수합니다.
+        </p>
+      </div>
+
+      <h2>5. 데이터 삭제 및 권한 철회 방법</h2>
+      <ul>
+        <li>
+          <strong>로컬 캐시 삭제 및 연결 해제:</strong> 앱 내 <strong>설정(Settings)</strong>
+          화면에서 Google Drive 연결 해제 및 로컬 캐시 초기화를 실행할 수 있습니다.
+        </li>
+        <li>
+          <strong>클라우드 데이터 영구 삭제:</strong> 사용자 본인의 Google Drive에서
+          <code>JH_Wine_Forest</code> 폴더를 삭제하면 저장된 모든 데이터와 사진, 백업이 즉시
+          제거됩니다.
+        </li>
+        <li>
+          <strong>Google 계정 접근 권한 철회:</strong> 언제든지
+          <a
+            href="https://myaccount.google.com/permissions"
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            Google 계정 보안 설정(서드파티 앱 연결)</a
+          >에서 <strong>JH Wine Forest</strong>의 접근 권한을 철회할 수 있습니다.
+        </li>
+      </ul>
+
+      <h2>6. 방침의 변경 및 문의처</h2>
+      <p>
+        본 개인정보처리방침은 기능 변경이나 관련 정책 개정에 따라 수정될 수 있으며, 변경 사항은
+        이 페이지를 통해 공지합니다. 개인정보 보호와 관련된 문의는 아래 저장소 채널을 통해 접수할
+        수 있습니다.
+      </p>
+      <ul>
+        <li>
+          <strong>운영자 / 프로젝트:</strong> JH Wine Forest
+        </li>
+        <li>
+          <strong>문의 채널:</strong>
+          <a
+            href="https://github.com/Jihoon2-Jung/wine-forest/issues"
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            https://github.com/Jihoon2-Jung/wine-forest/issues
+          </a>
+        </li>
+      </ul>
+
+      <hr class="divider" />
+
+      <section lang="en">
+        <h2>English Summary (Privacy Policy)</h2>
+        <p>
+          <strong>JH Wine Forest</strong> is a personal wine cellar management application (Web PWA,
+          iOS, and Android) that operates without a developer-hosted backend server.
+        </p>
+        <ul>
+          <li>
+            <strong>Google API Scope &amp; Data Accessed:</strong> When you sign in with Google,
+            the app requests only the non-sensitive
+            <code>https://www.googleapis.com/auth/drive.file</code> scope to create, read, and
+            update files exclusively created or opened by this app inside your own Google Drive
+            folder (<code>JH_Wine_Forest/wine_db.json</code>, <code>photos/</code>, and
+            <code>backups/</code>). The app cannot access any other files in your Google Drive.
+          </li>
+          <li>
+            <strong>Storage &amp; No Third-Party Sharing:</strong> All cellar records and photos
+            remain solely in your device's local cache (IndexedDB) and your personal Google Drive.
+            We do not collect, transmit to external servers, sell, share with third parties, use for
+            advertising, or use Google user data to train AI/ML models.
+          </li>
+          <li>
+            <strong>Google API Limited Use Compliance:</strong> JH Wine Forest's use and transfer to
+            any other app of information received from Google APIs will adhere to the
+            <a
+              href="https://developers.google.com/terms/api-data-user-data-policy"
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              Google API Services User Data Policy</a
+            >, including the Limited Use requirements.
+          </li>
+          <li>
+            <strong>Deletion &amp; Revocation:</strong> You can disconnect and clear local cache
+            from the app's Settings screen, delete the <code>JH_Wine_Forest</code> folder directly
+            in Google Drive, and revoke access at any time via
+            <a
+              href="https://myaccount.google.com/permissions"
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              Google Account Permissions</a
+            >.
+          </li>
+          <li>
+            <strong>Contact:</strong>
+            <a
+              href="https://github.com/Jihoon2-Jung/wine-forest/issues"
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              https://github.com/Jihoon2-Jung/wine-forest/issues
+            </a>
+          </li>
+        </ul>
+      </section>
+
+      <div class="footer">
+        <span>© JH Wine Forest</span>
+        <a href="./">← JH Wine Forest 앱으로 돌아가기</a>
+      </div>
+    </main>
+  </body>
+</html>
