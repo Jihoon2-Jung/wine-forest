@@ -201,7 +201,7 @@ export function SettingsPage() {
     setConfirmDialog({
       title: '로컬 캐시 초기화',
       message:
-        '이 브라우저의 로컬 캐시와 연결 상태를 초기화하고 온보딩 화면으로 돌아갈까요?\n(Google Drive 파일은 삭제되지 않습니다.)',
+        '이 기기의 로컬 캐시와 연결 상태를 초기화하고 온보딩 화면으로 돌아갈까요?\n(Google Drive 파일은 삭제되지 않습니다.)',
       confirmLabel: '초기화',
       tone: 'danger',
       onConfirm: async () => {
@@ -443,14 +443,14 @@ export function SettingsPage() {
         <input
           ref={fileInputRef}
           type="file"
-          accept="application/json,.json"
+          accept=".json,application/json,text/plain,*/*"
           className="hidden"
           onChange={(e) => void handleImportFile(e)}
         />
         <input
           ref={labelsBundleInputRef}
           type="file"
-          accept="application/json,.json"
+          accept=".json,application/json,text/plain,*/*"
           className="hidden"
           onChange={(e) => void handleImportLabelsBundle(e)}
         />
@@ -536,7 +536,7 @@ export function SettingsPage() {
       <section className="flex items-center justify-between gap-3 rounded-2xl border border-status-danger/30 bg-status-danger/5 p-4">
         <div>
           <h3 className="text-xs font-bold text-status-danger">로컬 캐시 초기화</h3>
-          <p className="text-[11px] text-secondary">브라우저 캐시를 비우고 온보딩 화면으로 돌아갑니다.</p>
+          <p className="text-[11px] text-secondary">기기 로컬 캐시를 비우고 온보딩 화면으로 돌아갑니다.</p>
         </div>
         <button
           type="button"

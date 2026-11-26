@@ -312,7 +312,7 @@ export function QuickAddModal() {
     }
     setSubmitting(true);
     try {
-      await addBottles({
+      const commitRes = await addBottles({
         name: trimmedName,
         producer: producer.trim() || undefined,
         country: country.trim(),
@@ -332,7 +332,9 @@ export function QuickAddModal() {
         drinkingWindowStart: parsedDwStart,
         drinkingWindowEnd: parsedDwEnd,
       });
-      closeQuickAdd();
+      if (commitRes !== 'invalid') {
+        closeQuickAdd();
+      }
     } finally {
       setSubmitting(false);
     }

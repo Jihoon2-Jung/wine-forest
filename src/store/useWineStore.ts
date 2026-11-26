@@ -186,6 +186,7 @@ function detectDeviceLabel(): string {
   if (Capacitor.isNativePlatform()) {
     const platform = Capacitor.getPlatform();
     if (platform === 'ios') return 'iOS App';
+    if (platform === 'android') return 'Android App';
     return 'Mobile App';
   }
   if (typeof navigator === 'undefined') return 'Web';
@@ -275,7 +276,8 @@ interface WineStoreState {
 
   // Sync & Conflict & Backups
   reauthenticateAndSync: () => Promise<void>;
-  syncNow: () => Promise<void>;
+  syncNow: (options?: { silent?: boolean }) => Promise<void>;
+  syncOnForegroundResume: () => Promise<void>;
   resolveConflict: (strategy: 'pull_remote' | 'force_overwrite' | 'download_local') => Promise<void>;
   fetchBackups: () => Promise<void>;
   createManualBackup: () => Promise<void>;
@@ -283,7 +285,7 @@ interface WineStoreState {
   exportLocalJson: () => void;
 
   // Domain Mutations
-  addBottles: (input: AddBottlesInput) => Promise<void>;
+  addBottles: (input: AddBottlesInput) => Promise<CommitResult>;
   updateWineMaster: (
     wineId: string,
     patch: Partial<Omit<WineMaster, 'id' | 'createdAt'>>,
@@ -292,7 +294,7 @@ interface WineStoreState {
   updateBottle: (bottleId: string, patch: Partial<Omit<BottleInstance, 'id' | 'wineId' | 'createdAt'>>) => Promise<void>;
   deleteBottle: (bottleId: string) => Promise<void>;
   moveBottle: (bottleId: string, targetLocationId: string | null) => Promise<void>;
-  consumeOrGiftBottle: (input: ConsumeBottleInput) => Promise<void>;
+  consumeOrGiftBottle: (input: ConsumeBottleInput) => Promise<CommitResult>;
   restoreBottleToStock: (bottleId: string, targetLocationId: string | null) => Promise<void>;
   updateTastingRecord: (
     tastingId: string,
@@ -333,6 +335,8 @@ interface WineStoreState {
 
 export const useWineStore = create<WineStoreState>((set, get) => {
   let mutationRevision = 0;
+  let lastRemoteSyncCheckAt = 0;
+  const RESUME_SYNC_THROTTLE_MS = 30_000;
 
   const persistLocalCache = async (override?: Partial<{
     data: WineDatabase | null;
@@ -566,6 +570,9 @@ export const useWineStore = create<WineStoreState>((set, get) => {
         conflict: null,
         syncError: null,
       });
+      if (!hasNewerLocalMutation && modeAtCall === 'google_drive') {
+        lastRemoteSyncCheckAt = Date.now();
+      }
       syncNativeAuthStateIfNeeded();
 
       const localSavedAfterSync = await persistLocalCache({
@@ -705,7 +712,7 @@ export const useWineStore = create<WineStoreState>((set, get) => {
             if (latest.hasUnsyncedChanges && latest.db) {
               await commitMutation(latest.db, '대기 중이던 변경사항을 Google Drive에 동기화했습니다.');
             } else if (latest.db) {
-              await get().syncNow();
+              await get().syncNow({ silent: true });
             }
           } else if (get().hasUnsyncedChanges) {
             set({ syncStatus: 'auth_required' });
@@ -1004,6 +1011,7 @@ export const useWineStore = create<WineStoreState>((set, get) => {
 
     disconnectAndResetLocal: async () => {
       mutationRevision += 1;
+      lastRemoteSyncCheckAt = 0;
       await clearAccessToken();
       googleDriveAdapter.resetWorkspaceCache();
       localOnlyAdapter.reset();
@@ -1080,16 +1088,21 @@ export const useWineStore = create<WineStoreState>((set, get) => {
       }
     },
 
-    syncNow: async () => {
+    syncNow: async (options) => {
+      const silent = Boolean(options?.silent);
       const state = get();
       if (state.storageMode === 'local_test') {
         set({ syncStatus: 'synced' });
-        get().showToast('로컬 테스트 모드는 모든 변경이 즉시 저장됩니다.', 'info');
+        if (!silent) {
+          get().showToast('로컬 테스트 모드는 모든 변경이 즉시 저장됩니다.', 'info');
+        }
         return;
       }
       if (!isNativeAuth() && !isTokenValid()) {
         set({ syncStatus: 'auth_required' });
-        get().showToast('토큰이 만료되었습니다. [구글 재인증]을 눌러 주세요.', 'warning');
+        if (!silent) {
+          get().showToast('토큰이 만료되었습니다. [구글 재인증]을 눌러 주세요.', 'warning');
+        }
         return;
       }
 
@@ -1099,6 +1112,7 @@ export const useWineStore = create<WineStoreState>((set, get) => {
       }
 
       const startRev = mutationRevision;
+      const prevSyncStatus = state.syncStatus;
       set({ syncStatus: 'syncing', syncError: null });
       try {
         const found = await googleDriveAdapter.findDbFile();
@@ -1111,6 +1125,7 @@ export const useWineStore = create<WineStoreState>((set, get) => {
             set({ fileId: null, lastSyncedModifiedTime: null });
             await commitMutation(latest.db, 'Google Drive에 새 DB 파일을 생성했습니다.');
           } else {
+            lastRemoteSyncCheckAt = Date.now();
             set({ syncStatus: 'synced' });
             syncNativeAuthStateIfNeeded();
           }
@@ -1128,6 +1143,7 @@ export const useWineStore = create<WineStoreState>((set, get) => {
           ) {
             return;
           }
+          lastRemoteSyncCheckAt = Date.now();
           set({
             db: loaded.data,
             fileId: found.fileId,
@@ -1144,21 +1160,52 @@ export const useWineStore = create<WineStoreState>((set, get) => {
           });
           get().showToast('Google Drive 최신 데이터를 반영했습니다.', 'success');
         } else {
+          lastRemoteSyncCheckAt = Date.now();
           if (mutationRevision === startRev && !get().hasUnsyncedChanges) {
             set({ syncStatus: 'synced' });
           }
           syncNativeAuthStateIfNeeded();
-          get().showToast('이미 최신 상태입니다.', 'info');
+          if (!silent) {
+            get().showToast('이미 최신 상태입니다.', 'info');
+          }
         }
       } catch (err) {
         if (err instanceof AuthRequiredError) {
           set({ syncStatus: 'auth_required', syncError: err.message });
         } else {
           const msg = err instanceof Error ? err.message : '동기화 실패';
-          set({ syncStatus: 'error', syncError: msg });
-          get().showToast(msg, 'error');
+          if (silent) {
+            set({
+              syncStatus: prevSyncStatus === 'synced' ? 'offline_cache' : prevSyncStatus,
+              syncError: msg,
+            });
+          } else {
+            set({ syncStatus: 'error', syncError: msg });
+            get().showToast(msg, 'error');
+          }
         }
       }
+    },
+
+    syncOnForegroundResume: async () => {
+      const state = get();
+      if (
+        state.storageMode !== 'google_drive' ||
+        !state.db ||
+        state.hasUnsyncedChanges ||
+        state.conflict ||
+        state.syncStatus === 'syncing' ||
+        state.syncStatus === 'auth_required'
+      ) {
+        return;
+      }
+      if (!isNativeAuth() && !isTokenValid()) {
+        return;
+      }
+      if (Date.now() - lastRemoteSyncCheckAt < RESUME_SYNC_THROTTLE_MS) {
+        return;
+      }
+      await get().syncNow({ silent: true });
     },
 
     resolveConflict: async (strategy) => {
@@ -1364,7 +1411,7 @@ export const useWineStore = create<WineStoreState>((set, get) => {
 
     addBottles: async (input) => {
       const db = get().db;
-      if (!db) return;
+      if (!db) return 'invalid';
       const now = new Date().toISOString();
       const trimmedName = input.name.trim();
       const trimmedCountry = input.country.trim() || '미분류';
@@ -1451,7 +1498,7 @@ export const useWineStore = create<WineStoreState>((set, get) => {
         updatedAt: now,
       }));
 
-      await commitMutation(
+      return commitMutation(
         {
           ...db,
           wines: nextWines,
@@ -1614,10 +1661,10 @@ export const useWineStore = create<WineStoreState>((set, get) => {
       photoFileIds,
     }) => {
       const db = get().db;
-      if (!db) return;
+      if (!db) return 'invalid';
       if (!db.bottles.some((b) => b.id === bottleId)) {
         get().showToast('대상 병 기록을 찾을 수 없습니다.', 'warning');
-        return;
+        return 'invalid';
       }
       const now = new Date().toISOString();
       const nextBottles = db.bottles.map((b) =>
@@ -1644,7 +1691,7 @@ export const useWineStore = create<WineStoreState>((set, get) => {
         createdAt: now,
       };
       const filteredTastings = db.tastings.filter((t) => t.bottleId !== bottleId);
-      await commitMutation(
+      return commitMutation(
         {
           ...db,
           bottles: nextBottles,

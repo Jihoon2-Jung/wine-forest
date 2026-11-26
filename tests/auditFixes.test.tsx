@@ -38,11 +38,13 @@ vi.mock('@/services/storage/localCache', () => ({
 }));
 
 import { useWineStore } from '@/store/useWineStore';
-import { BottomSheet } from '@/components/common/BottomSheet';
+import { BottomSheet, handleTopModalBack } from '@/components/common/BottomSheet';
 import { PhotoLightbox } from '@/components/common/PhotoLightbox';
+import { HistoryCard } from '@/components/history/HistoryCard';
 import { TrendChart } from '@/components/stats/TrendChart';
 import { WineDetailSheet } from '@/components/wines/WineDetailSheet';
 import { QuickAddModal } from '@/components/wines/QuickAddModal';
+import { QuickConsumeModal } from '@/components/wines/QuickConsumeModal';
 
 describe('Full Audit Regression Suite — Schema, Domain & Analytics', () => {
   it('rejects impossible calendar dates, duplicate IDs, and duplicate tasting bottleIds in Zod', () => {
@@ -445,5 +447,138 @@ describe('Full Audit Regression Suite — Store, Sync & UI Safety', () => {
     expect(screen.getByText(/오프라인\/재인증 필요 상태/)).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '사진 닫기' }));
     expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('handles Android back modal stack cleanly for dismissible and locked modals', () => {
+    const onCloseDismissible = vi.fn();
+    const onCloseLocked = vi.fn();
+
+    const { rerender } = render(
+      <>
+        <BottomSheet open title="일반 시트" onClose={onCloseDismissible}>
+          <div>Normal</div>
+        </BottomSheet>
+        <BottomSheet open dismissible={false} title="충돌 잠금" onClose={onCloseLocked}>
+          <div>Locked</div>
+        </BottomSheet>
+      </>,
+    );
+
+    // Locked top modal consumes back event without closing either modal
+    expect(handleTopModalBack()).toBe(true);
+    expect(onCloseLocked).not.toHaveBeenCalled();
+    expect(onCloseDismissible).not.toHaveBeenCalled();
+
+    // Once locked modal closes, back event closes the dismissible modal
+    rerender(
+      <>
+        <BottomSheet open title="일반 시트" onClose={onCloseDismissible}>
+          <div>Normal</div>
+        </BottomSheet>
+        <BottomSheet open={false} dismissible={false} title="충돌 잠금" onClose={onCloseLocked}>
+          <div>Locked</div>
+        </BottomSheet>
+      </>,
+    );
+    expect(handleTopModalBack()).toBe(true);
+    expect(onCloseDismissible).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps QuickConsumeModal open when consumeOrGiftBottle returns invalid', async () => {
+    const demo = createDemoDatabase();
+    const wine = demo.wines[0];
+    const inStock = demo.bottles.filter((b) => b.wineId === wine.id && b.status === 'IN_STOCK');
+    const onClose = vi.fn();
+    const origConsume = useWineStore.getState().consumeOrGiftBottle;
+    const consumeSpy = vi.fn(async () => 'invalid' as const);
+    useWineStore.setState({ db: demo, consumeOrGiftBottle: consumeSpy });
+
+    try {
+      render(
+        <QuickConsumeModal
+          open
+          wine={wine}
+          bottles={inStock}
+          initialBottleId={inStock[0].id}
+          onClose={onClose}
+        />,
+      );
+      fireEvent.click(screen.getByRole('button', { name: /소비 완료 저장/ }));
+      await waitFor(() => {
+        expect(consumeSpy).toHaveBeenCalledTimes(1);
+      });
+      expect(onClose).not.toHaveBeenCalled();
+    } finally {
+      useWineStore.setState({ consumeOrGiftBottle: origConsume });
+    }
+  });
+
+  it('preserves HistoryCard editing state when updateTastingRecord returns invalid', async () => {
+    const demo = createDemoDatabase();
+    const bottle = demo.bottles[0];
+    const wine = demo.wines.find((w) => w.id === bottle.wineId)!;
+    const tasting = {
+      id: 't-invalid-1',
+      bottleId: bottle.id,
+      type: 'CONSUMED' as const,
+      eventDate: '2026-11-20',
+      occasion: '모임',
+      createdAt: '2026-11-20T12:00:00.000Z',
+    };
+    const origUpdate = useWineStore.getState().updateTastingRecord;
+    const updateSpy = vi.fn(async () => 'invalid' as const);
+    useWineStore.setState({ db: demo, updateTastingRecord: updateSpy });
+
+    try {
+      render(
+        <HistoryCard
+          tasting={tasting}
+          bottle={{ ...bottle, status: 'CONSUMED' }}
+          wine={wine}
+          locations={demo.locations}
+        />,
+      );
+      fireEvent.click(screen.getByRole('button', { name: '이력 수정' }));
+      expect(screen.getByRole('button', { name: '저장' })).toBeInTheDocument();
+
+      fireEvent.click(screen.getByRole('button', { name: '저장' }));
+      await waitFor(() => {
+        expect(updateSpy).toHaveBeenCalledTimes(1);
+      });
+      // Edit panel stays open so user does not lose their draft
+      expect(screen.getByRole('button', { name: '저장' })).toBeInTheDocument();
+    } finally {
+      useWineStore.setState({ updateTastingRecord: origUpdate });
+    }
+  });
+
+  it('guards syncOnForegroundResume against unsynced changes and conflicts', async () => {
+    const origSyncNow = useWineStore.getState().syncNow;
+    const syncSpy = vi.fn(async () => undefined);
+    useWineStore.setState({
+      storageMode: 'google_drive',
+      syncStatus: 'synced',
+      hasUnsyncedChanges: true,
+      conflict: null,
+      syncNow: syncSpy,
+    });
+
+    try {
+      await useWineStore.getState().syncOnForegroundResume();
+      expect(syncSpy).not.toHaveBeenCalled();
+
+      useWineStore.setState({
+        hasUnsyncedChanges: false,
+        conflict: {
+          fileId: 'f1',
+          expectedModifiedTime: 't1',
+          remoteModifiedTime: 't2',
+        },
+      });
+      await useWineStore.getState().syncOnForegroundResume();
+      expect(syncSpy).not.toHaveBeenCalled();
+    } finally {
+      useWineStore.setState({ syncNow: origSyncNow, conflict: null, hasUnsyncedChanges: false });
+    }
   });
 });

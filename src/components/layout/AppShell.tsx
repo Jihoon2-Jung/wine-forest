@@ -1,6 +1,8 @@
-import type { ReactNode } from 'react';
+import { useEffect, useRef, type ReactNode } from 'react';
 import { KeyRound } from 'lucide-react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { isNativeAuth } from '@/services/auth/googleAuth';
+import { initAndroidBackButton, initAppLifecycleListeners } from '@/services/native/nativeBridge';
 import { useWineStore } from '@/store/useWineStore';
 import { ConflictModal } from '@/components/common/ConflictModal';
 import { ToastBar } from '@/components/common/ToastBar';
@@ -15,6 +17,53 @@ export function AppShell({ children }: { children: ReactNode }) {
   const hasUnsyncedChanges = useWineStore((s) => s.hasUnsyncedChanges);
   const storageMode = useWineStore((s) => s.storageMode);
   const reauthenticateAndSync = useWineStore((s) => s.reauthenticateAndSync);
+  const syncOnForegroundResume = useWineStore((s) => s.syncOnForegroundResume);
+  const showToast = useWineStore((s) => s.showToast);
+
+  const location = useLocation();
+  const navigate = useNavigate();
+  const pathnameRef = useRef(location.pathname);
+  pathnameRef.current = location.pathname;
+
+  useEffect(() => {
+    let active = true;
+    let cleanupBack: (() => void) | undefined;
+    let cleanupLifecycle: (() => void) | undefined;
+
+    void initAndroidBackButton({
+      getPathname: () => pathnameRef.current,
+      navigateBack: () => navigate(-1),
+      navigateHome: () => navigate('/', { replace: true }),
+      showExitHint: () => showToast('한 번 더 누르면 앱이 종료됩니다.', 'info'),
+    }).then((fn) => {
+      if (active) {
+        cleanupBack = fn;
+      } else {
+        fn();
+      }
+    });
+
+    void initAppLifecycleListeners({
+      onResume: () => {
+        void syncOnForegroundResume();
+      },
+      onCameraRestored: () => {
+        showToast('메모리 부족으로 화면이 재시작되어 방금 촬영한 사진을 다시 선택해 주세요.', 'warning');
+      },
+    }).then((fn) => {
+      if (active) {
+        cleanupLifecycle = fn;
+      } else {
+        fn();
+      }
+    });
+
+    return () => {
+      active = false;
+      cleanupBack?.();
+      cleanupLifecycle?.();
+    };
+  }, [navigate, showToast, syncOnForegroundResume]);
 
   const showReauthBanner =
     storageMode === 'google_drive' && (syncStatus === 'auth_required' || hasUnsyncedChanges);

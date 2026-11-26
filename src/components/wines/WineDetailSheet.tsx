@@ -198,10 +198,10 @@ export function WineDetailSheet({ wineId, onClose }: WineDetailSheetProps) {
 
   const handlePickLabelPhoto = async () => {
     if (uploadingLabel) return;
-    const blob = await pickImageFile({ preset: 'label' });
-    if (!blob) return;
     setUploadingLabel(true);
     try {
+      const blob = await pickImageFile({ preset: 'label' });
+      if (!blob) return;
       await uploadWineLabelPhoto(wine.id, blob);
     } finally {
       setUploadingLabel(false);

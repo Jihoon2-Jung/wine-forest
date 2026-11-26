@@ -20,6 +20,19 @@ function handleGlobalModalKeyDown(e: KeyboardEvent) {
   }
 }
 
+/**
+ * Android 하드웨어/제스처 뒤로가기 시 최상단 모달(BottomSheet/ConfirmDialog/PhotoLightbox)을 닫는다.
+ * 닫을 수 없는 모달(ConflictModal 등)이 열려 있을 때도 true를 반환해 배경 라우트 이탈을 방지한다.
+ */
+export function handleTopModalBack(): boolean {
+  const top = modalStack[modalStack.length - 1];
+  if (!top) return false;
+  if (top.isDismissible()) {
+    top.onEscape();
+  }
+  return true;
+}
+
 export function registerModalLayer(
   isDismissible: () => boolean,
   onEscape: () => void,

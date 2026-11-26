@@ -5,6 +5,7 @@ const config: CapacitorConfig = {
   appName: 'JH Wine Forest',
   webDir: 'dist',
   server: {
+    androidScheme: 'https',
     iosScheme: 'capacitor',
   },
   ios: {
@@ -13,6 +14,10 @@ const config: CapacitorConfig = {
   plugins: {
     StatusBar: {
       overlaysWebView: true,
+    },
+    SystemBars: {
+      insetsHandling: 'css',
+      initialViewportFitValueHint: 'cover',
     },
   },
 };

@@ -191,7 +191,7 @@ export function OnboardingView() {
             <div>
               <h2 className="text-sm font-bold text-primary">로컬 테스트 모드 (OAuth 없이 즉시 체험)</h2>
               <p className="text-xs text-secondary">
-                이 브라우저의 IndexedDB에 저장되며 설정에서 언제든 Google Drive 모드로 전환할 수 있습니다.
+                이 기기(IndexedDB)에 저장되며 설정에서 언제든 Google Drive 모드로 전환할 수 있습니다.
               </p>
             </div>
           </div>
@@ -232,7 +232,7 @@ export function OnboardingView() {
       <input
         ref={fileInputRef}
         type="file"
-        accept="application/json,.json"
+        accept=".json,application/json,text/plain,*/*"
         className="hidden"
         onChange={(e) => void handleFileSelected(e)}
       />

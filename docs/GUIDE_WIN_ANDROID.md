@@ -1,7 +1,7 @@
 # JH Wine Forest — Windows PC Android 빌드 · 서명 · 배포 실전 가이드 (`GUIDE_WIN_ANDROID.md`)
 
 > **문서 목적:** 본 가이드는 **단일 Git 저장소(`wine-forest`) + PC 이원화 빌드 전략(Mac = iOS / Windows = Android)**에 따라, **Windows PC에서 Android 앱을 구현·빌드·서명·실기기 설치**하기 위한 단독 실행형 매뉴얼입니다.
-> - **상태:** **WINDOWS STANDALONE — Mac에서는 공통 웹/앱 코드(`src/`)와 `ios/`만 선행 구현되며, `android/` 스캐폴딩(`@capacitor/android`, `@capacitor/app`, `GoogleDriveAuthPlugin.kt`, Android 뒤로가기 연동)은 저장소에 포함하지 않고 Windows PC에서 직접 생성·구현합니다.**
+> - **상태:** **WINDOWS ANDROID RELEASE APK v1.0.1 (versionCode 2) VERIFIED (2026-11-26) — Windows PC(JDK 21 + Android API 36)에서 `@capacitor/android@8.6.2` · `@capacitor/app@8.1.2` · `GoogleDriveAuthPlugin.kt`(이메일 영속화·`bridge.saveCall`·오프라인 네트워크 세션 보존) · `MainActivity.kt` · `SystemBars` Edge-to-Edge 상/하단바 동기화 · 포그라운드 복귀 자동 동기화 · 카메라 이중 탭 잠금 · 검증 실패 모달/사진 보존 · Android `.json` 피커 호환 · `allowBackup=false` · 조건부 Release 서명까지 전량 반영 (`8개 스위트 / 59개 테스트` 통과) 및 서명된 `app-release.apk` 실기기 설치 완료.**
 >
 > **전제 조건:** Mac에서 공통 웹/앱 코드(`src/`), `AuthAdapter`, `capacitor.config.ts`가 `main` 브랜치에 푸시되어 있으나 **`android/` 디렉터리는 아직 생성되지 않은 상태**입니다. Windows에서 `git pull` 후 아래 안내에 따라 `@capacitor/android` 설치 및 Android 프로젝트를 생성해 진행합니다. (전체 설계는 [MOBILE_IMPLEMENTATION_PLAN.md](./MOBILE_IMPLEMENTATION_PLAN.md) 참고)
 
@@ -66,13 +66,14 @@ git status --short
 
 1. **Git for Windows:** 최신 버전 설치 (설치 중 줄바꿈 옵션은 `Checkout as-is, commit Unix-style line endings` 권장).
 2. **Node.js 22+ LTS:** [nodejs.org](https://nodejs.org/)에서 LTS 설치 (`node -v`로 확인).
-3. **Android Studio (2025.2.1 이상):**
-   * 공식 설치 마법사(Standard)로 설치하면 **호환 JDK(JBR)와 Android SDK가 자동으로 함께 설치**됩니다. (별도 Oracle JDK 수동 설치 불필요)
+3. **JDK 21 & Android SDK (필수 — Capacitor 8 기준):**
+   * **Capacitor 8 (`AGP 8.13.0` / `Gradle 8.14.3` / `Kotlin 2.2.20`)**은 **JDK 21**(`JAVA_HOME`)과 **Android API 36 (`compileSdkVersion = 36`, `targetSdkVersion = 36`, `Build-Tools 36.0.0`)**이 필요합니다.
+   * **Android Studio (2025.2.1 Otter 이상)**를 Standard로 설치하면 호환 JBR 21과 Android SDK가 자동 설치되며, CLI 전용으로 운영할 경우 **Eclipse Temurin JDK 21**과 `sdkmanager "platforms;android-36" "build-tools;36.0.0"`으로 구성할 수 있습니다.
 4. **SDK Manager 필수 항목 확인:**
    * Android Studio 열기 → **More Actions > SDK Manager** (또는 `Settings > Languages & Frameworks > Android SDK`):
-     * **SDK Platforms 탭:** 최신 안정 Android API(예: Android 15 / API 35 또는 최신) 체크
+     * **SDK Platforms 탭:** Android 16 (API 36) 체크 (`android/variables.gradle` 기본값)
      * **SDK Tools 탭:**
-       * `Android SDK Build-Tools`
+       * `Android SDK Build-Tools` (`36.0.0`)
        * `Android SDK Platform-Tools` (`adb` 포함)
        * `Android SDK Command-line Tools (latest)`
 5. *(선택) PowerShell에서 `adb` 바로 쓰기:* `%LOCALAPPDATA%\Android\Sdk\platform-tools`를 Windows 사용자 환경변수 `Path`에 추가하면 어느 폴더에서든 `adb` 명령어를 사용할 수 있습니다.

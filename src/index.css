@@ -33,12 +33,12 @@
   scrollbar-width: none;
 }
 
-/* Safe area padding for iOS standalone PWA */
+/* Safe area padding for iOS/Android native apps and standalone PWA */
 @layer utilities {
   .pb-safe {
-    padding-bottom: env(safe-area-inset-bottom, 0px);
+    padding-bottom: env(safe-area-inset-bottom, var(--safe-area-inset-bottom, 0px));
   }
   .pt-safe {
-    padding-top: env(safe-area-inset-top, 0px);
+    padding-top: env(safe-area-inset-top, var(--safe-area-inset-top, 0px));
   }
 }

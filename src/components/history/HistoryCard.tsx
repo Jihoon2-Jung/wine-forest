@@ -130,6 +130,10 @@ export function HistoryCard({ tasting, bottle, wine, locations }: HistoryCardPro
         tastingNote: draftTastingNote,
         photoFileIds: draftPhotoFileIds,
       });
+      // 스키마 검증 실패 시 작성 중인 초안·미저장 사진 참조를 유지해 입력 유실 및 고아 파일 방지
+      if (commitRes === 'invalid') {
+        return;
+      }
       // 동기화 성공(synced) 시에만 원격 Drive 삭제까지 확정 (충돌/오프라인 시 404 방지 - M10)
       if (commitRes === 'synced') {
         for (const removedId of pendingRemovedPhotoIds) {
@@ -345,11 +349,11 @@ export function HistoryCard({ tasting, bottle, wine, locations }: HistoryCardPro
                   disabled={uploadingPhoto}
                   onClick={async () => {
                     if (draftPhotoFileIds.length >= 3 || uploadingPhoto) return;
-                    const blob = await pickImageFile({ preset: 'tasting' });
-                    if (!blob) return;
                     const sessionAtStart = editSessionRef.current;
                     setUploadingPhoto(true);
                     try {
+                      const blob = await pickImageFile({ preset: 'tasting' });
+                      if (!blob) return;
                       const uploadedId = await uploadTastingPhoto(blob);
                       if (uploadedId) {
                         if (editSessionRef.current !== sessionAtStart) {

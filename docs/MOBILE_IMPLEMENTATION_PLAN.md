@@ -1,7 +1,7 @@
 # JH Wine Forest — 모바일 앱(iOS / Android) 전환 마스터 구현 계획 (Mobile v1.0)
 
 > **연관 문서 (모바일 시리즈):**
-> - **상태:** **M1~M4 완료 + M5 iOS 실기기 테스트 및 전수 감사 안정화 패치 완료 (2026-11-26: Part A 46건 전량 수정 · `8개 스위트 / 55개 테스트` 통과 · `.ipa` 재빌드 후 최종 실기기 확인 대기 / Android는 Windows PC 별도 진행)**
+> - **상태:** **M1~M6 완료 + Android 실기기 설치 및 전수 감사 안정화 패치 10건 완료 (2026-11-26: Part A 46건 + Android/공통 감사 10건 전량 수정 · `8개 스위트 / 59개 테스트` 통과 · 웹/모바일 듀얼 빌드 통과 · `versionCode 2 / 1.0.1` 서명된 `app-release.apk` 빌드·검증 및 실기기 설치 완료)**
 > - **마스터 구현 계획:** `MOBILE_IMPLEMENTATION_PLAN.md` (본 문서)
 > - **Mac · iOS(+공통 코드 & Android 선행) 개발 작업지시서:** [SPEC_MOBILE_IOS.md](./SPEC_MOBILE_IOS.md)
 > - **Windows · Android 빌드/배포 실전 가이드:** [GUIDE_WIN_ANDROID.md](./GUIDE_WIN_ANDROID.md)
@@ -19,13 +19,13 @@
 | **앱 식별자 (App ID)** | **`com.jihoon.wineforest`** | iOS Bundle ID 및 Android Application/Package ID 동일 적용 |
 | **표시 이름** | `JH Wine Forest` (`short_name`: `Wine Forest`) | 기존 PWA 매니페스트와 동일 |
 | **빌드 PC 이원화 전략** | **Mac (iOS 전용) + Windows (Android 전용)** | Git 저장소는 1개 유지, 빌드/실기기 배포 환경만 PC별로 역할 분담 |
-| **Android 선행 코드** | **Mac에서 스캐폴딩 + Kotlin 플러그인까지 선행 커밋** | Windows에서는 `git pull` → Keystore/SHA-1 등록 → 빌드만 수행 |
+| **Android 선행 코드** | **Windows PC 단독 스캐폴딩 · Release APK 검증 완료** | `@capacitor/android@8.6.2` · `@capacitor/app@8.1.2` · `GoogleDriveAuthPlugin.kt` · `build.gradle` 조건부 Release 서명 · `assembleDebug`/`assembleRelease` 검증 완료 |
 | **네이티브 Google 인증** | **방식 A: 공식 SDK 경량 커스텀 로컬 플러그인** (`GoogleDriveAuth`) | iOS `GoogleSignIn-iOS` (SPM) + Android `AuthorizationClient` (`play-services-auth`) |
 | **OAuth 스코프 및 프로젝트** | `https://www.googleapis.com/auth/drive.file` (**기존 웹과 동일 Google Cloud 프로젝트**) | 3기기(PC 웹·iOS·Android)가 동일한 `JH_Wine_Forest/wine_db.json` 공유 |
 | **OAuth 동의 화면 상태** | **프로덕션(Production) 게시 전환** | Refresh Token 7일 만료 제한 해제 → **사실상 영구 자동 로그인** (`drive.file`은 비민감 스코프) |
 | **iOS 의존성 및 서명** | **SPM (`CapApp-SPM` + `GoogleSignIn-iOS`) + GitHub Actions(`xcode-27`) 미서명 `.ipa` → Sideloadly/SideStore 무료 서명** | Intel Mac(Xcode 27 미지원) + iOS 27 조합 대응, Mac 디스크 0GB 사용 (추후 연 \$99 TestFlight 전환 가능) |
 | **1차 포함 모바일 UX** | ① JSON 내보내기 네이티브 공유 시트<br>② OS 상태바 라이트/다크 자동 연동<br>③ Android 뒤로가기(모달/라우트) 처리 | 햅틱 진동(`@capacitor/haptics`)·CI Android APK 자동 빌드는 1차 범위 제외 |
-| **현재 작업 순서** | **M1~M4 완료 · M5 iOS 전수 감사 안정화 패치 완료 (`android/` 미구현)** | 카메라 `Info.plist`·Tailwind RGB 투명도·Safe-Area·StatusBar·Swift 스레드 안전성·WKWebView `ConfirmDialog` 전량 반영 완료 → `.ipa` 재빌드 및 실기기 확인 진행 |
+| **현재 작업 순서** | **M1~M5 완료 · M6 Windows Android `assembleRelease` APK 빌드·서명 검증 완료 (실기기 설치·교차 동기화 대기)** | iOS `ios/` 및 웹 PWA 무영향 유지, Windows JDK 21 + API 36 환경에서 Android 네이티브 플러그인·뒤로가기·상태바·카메라 권한·Release 서명 APK 생성 완료 |
 
 ---
 
@@ -138,7 +138,7 @@ flowchart TD
 - [x] `npm run build` 실행 시 `dist/index.html`의 에셋 경로가 `/wine-forest/`로 유지되고 `dist/sw.js`, `dist/manifest.webmanifest`가 정상 생성되는가?
 - [x] `BUILD_TARGET=capacitor` 미지정 상태에서 `Capacitor.isNativePlatform()`이 `false`로 평가되어 웹 브라우저가 항상 `WebGisAuthAdapter`를 타는가?
 - [x] 웹 환경에서 `nativeBridge.ts`의 StatusBar / App / Filesystem / Share 호출이 동적/안전 가드로 스킵되거나 기존 Blob 다운로드로 폴백되는가?
-- [x] 기존 테스트 스위트 + 모바일 어댑터 및 전수 감사 회귀 테스트(`privacyMode`, `schemaValidation`, `statsCalculator`, `syncConflict`, `wineStore`, `phase2`, `authAdapter`, `auditFixes` — 총 **8개 스위트 / 55개 테스트**)가 단 1건의 회귀 없이 모두 통과하는가?
+- [x] 기존 테스트 스위트 + 모바일 어댑터 및 전수 감사 회귀 테스트(`privacyMode`, `schemaValidation`, `statsCalculator`, `syncConflict`, `wineStore`, `phase2`, `authAdapter`, `auditFixes` — 총 **8개 스위트 / 59개 테스트**)가 단 1건의 회귀 없이 모두 통과하는가?
 - [x] `.github/workflows/deploy.yml`의 `npm run typecheck && npm run test && npm run build` CI 파이프라인이 추가 환경변수나 네이티브 도구 없이 그대로 통과하는가?
 
 ---
@@ -150,3 +150,4 @@ flowchart TD
   2. **카메라 권한 키 3종 완비 & 에러 노출:** `ios/App/App/Info.plist`에 `NSPhotoLibraryAddUsageDescription` 추가 + `photoPicker.ts` 한글 카메라 라벨(`promptLabel*`) 및 비취소 오류 토스트 노출.
   3. **UI 투명도 & Safe-Area & 모달 스택:** `tokens.css`/`tailwind.config.ts` RGB `<alpha-value>` 채널 + `status.*` 토큰 전환(152건 복구), `FabButton`/`ToastBar`/`AppShell`/`OnboardingView`/`PhotoLightbox`/`BottomSheet` Safe-Area 및 `lg:` 통일, 중첩 모달 스택(`registerModalLayer`) + 참조 카운트 스크롤 잠금.
   4. **iOS 네이티브 브릿지·Swift·CI 안정화:** `capacitor.config.ts`·`ios/App/App/capacitor.config.json` `StatusBar.overlaysWebView: true`, `GoogleDriveAuthPlugin.swift` 메인 스레드 직렬화·`CFBundleURLSchemes` 사전 검증·`SCOPE_DENIED` `signOut()` 정리, `SceneDelegate.swift` 콜드스타트·다중 URL 전달, `nativeGoogleAuthAdapter.ts` 401 토큰 무효화·`forceRefresh`·`sessionGeneration`·오프라인 세션 보존, `nativeBridge.ts` `Share.share` 중복 `text` 제거, `ConfirmDialog.tsx` 신설로 전 화면 `window.confirm` 제거(WKWebView 크래시 방지), `Info.plist` 한국어 로컬라이제이션(`ko`/`en`), `vite.config.ts` Capacitor 빌드 Web GIS `<script>` 제거, `ios-ipa.yml` `bundle_id`·`REVERSED_ID` 검증 강화.
+  5. **Android 실기기 & 전수 감사 패치 10건 (M6, `versionCode 2 / 1.0.1`):** Android 15~17(API 35+) `SystemBars` 상·하단 시스템 바 테마 동시 동기화 및 CSS `--safe-area-inset-*` 폴백(`capacitor.config.ts` `SystemBars` 설정 포함), `GoogleDriveAuthPlugin.kt` `SharedPreferences` 계정 영속화(`signOut()` 재시작 후 `revokeAccess` 보장)·`bridge.saveCall` 저메모리 안전성·네트워크 오류 세션 보존, 포그라운드 복귀 조용한 자동 동기화(`syncOnForegroundResume` 30초 쓰로틀 + `appStateChange`/`visibilitychange`) 및 `appRestoredResult` 카메라 복구 안내, `WineDetailSheet`/`QuickConsumeModal`/`HistoryCard` 사진 선택 이중 탭 잠금, `addBottles`/`consumeOrGiftBottle`/`updateTastingRecord` 검증 실패(`invalid`) 시 모달/초안·사진 보존, Android WebView `.json` 파일 피커 호환(`accept=".json,application/json,text/plain,*/*"`), `AndroidManifest.xml` `android:allowBackup="false"`, 네이티브 `"이 기기"` 문구 통일.

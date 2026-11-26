@@ -113,7 +113,7 @@ export function QuickConsumeModal({
     if (!selectedBottleId || submitting) return;
     setSubmitting(true);
     try {
-      await consumeOrGiftBottle({
+      const commitRes = await consumeOrGiftBottle({
         bottleId: selectedBottleId,
         type: eventType,
         eventDate: eventDate || getTodayIsoDate(),
@@ -124,6 +124,9 @@ export function QuickConsumeModal({
         tastingNote,
         photoFileIds,
       });
+      if (commitRes === 'invalid') {
+        return;
+      }
       uncommittedPhotosRef.current = [];
       onClose();
     } finally {
@@ -323,11 +326,11 @@ export function QuickConsumeModal({
                       disabled={uploadingPhoto}
                       onClick={async () => {
                         if (photoFileIds.length >= 3 || uploadingPhoto) return;
-                        const blob = await pickImageFile({ preset: 'tasting' });
-                        if (!blob) return;
                         const tokenAtStart = sessionTokenRef.current;
                         setUploadingPhoto(true);
                         try {
+                          const blob = await pickImageFile({ preset: 'tasting' });
+                          if (!blob) return;
                           const uploadedId = await uploadTastingPhoto(blob);
                           if (uploadedId) {
                             if (sessionTokenRef.current !== tokenAtStart) {
