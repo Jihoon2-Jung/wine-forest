@@ -220,4 +220,12 @@
   * **기준일 설정:** 누적 지출 기준일(`trackingSinceDate`, 기본 `2023-02-18`) 확인·수정 및 기존 병 일괄 재계산 옵션
   * **공개 개인정보처리방침 & Safe-Area:** Google OAuth 프로덕션 브랜딩용 정적 페이지 `public/privacy.html`(`/wine-forest/privacy.html`, 한국어 본문 + 영문 요약 + Google API Limited Use 조항) 제공; `src/index.css`의 `.pt-safe`/`.pb-safe`는 `env(safe-area-inset-*, var(--safe-area-inset-*, 0px))` 폴백으로 iOS/Android 15~17(API 35+) Edge-to-Edge를 공용 지원.
 
+### 3.9 무서버 읽기 전용 와인 리스트 공유 (`ShareListModal` & `SharedListPage`)
+* 상세 명세: [SPEC_SHARE_LINK.md](./SPEC_SHARE_LINK.md)
+* **발신 (`InventoryPage` → `ShareListModal`):** 목록 상단 요약 스트립의 **`[리스트 공유]`** 버튼으로 현재 필터링된(또는 전체) `WineGroupItem[]` 스냅샷을 공유합니다.
+  * 공유 제목, 프라이버시 체크박스 4종(보관 위치 / 구매 가격·환율 메모 / 구입처·최근 구입일 / 병 메모 — **모두 기본 OFF**, 해제 시 데이터 레벨에서 원천 제거), 소프트 만료일(`제한 없음` / `7일` / `30일`), 실시간 URL 길이 게이지(`3,500자` / `8,000자`), `[링크 복사]` · `[공유하기]`(OS 공유 시트) · `[텍스트 목록 복사]` · `[미리보기]` 제공.
+  * iOS 네이티브 앱(`capacitor://`)에서도 자동으로 공개 GitHub Pages URL(`https://jihoon2-jung.github.io/wine-forest/#/share?d=...`)을 생성합니다.
+* **수신 (`#/share?d=...` → `SharedListPage`):** `App.tsx`에서 `<HashRouter>`를 최상위로 두고 `/share` 경로를 `isHydrated`·`!db`(`OnboardingView`) 가드 바깥으로 선분기해, **Google 로그인이나 로컬 DB가 없는 외부 방문자도 즉시 읽기 전용 와인 리스트를 열람**합니다.
+  * 독립 로컬 검색·색상 필터·지금 적기 필터·정렬·카드/컴팩트 전환·로컬 금액 가리기 토글 제공(전역 `useWineStore.db`·`filters`·`isPrivacyMode`와 완전 격리).
+
 *(데이터 스키마, 동기화·충돌 방지·백업, 엑셀 마이그레이션, 디렉터리 구조 및 마일스톤 실행 계획은 **`SPEC_2_DATA_EXEC.md`**로 이어집니다.)*

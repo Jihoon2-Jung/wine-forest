@@ -1,7 +1,7 @@
 # JH Wine Forest — 모바일 앱(iOS / Android) 전환 마스터 구현 계획 (Mobile v1.0)
 
 > **연관 문서 (모바일 시리즈):**
-> - **상태:** **M1~M6 완료 + Android 실기기 설치 및 전수 감사 안정화 패치 10건 완료 (2026-11-26: Part A 46건 + Android/공통 감사 10건 전량 수정 · `8개 스위트 / 59개 테스트` 통과 · 웹/모바일 듀얼 빌드 통과 · `versionCode 2 / 1.0.1` 서명된 `app-release.apk` 빌드·검증 및 실기기 설치 완료)**
+> - **상태:** **M1~M6 완료 + Android 실기기 설치 · 전수 감사 패치 10건 · 무서버 공유 링크 `main` 통합 완료 (2026-11-26: Part A 46건 + Android/공통 감사 10건 + 무서버 공유 링크 전량 반영 · `9개 스위트 / 69개 테스트` 통과 · 웹/모바일 듀얼 빌드 및 `cap sync ios` 통과 · `versionCode 2 / 1.0.1` 서명된 `app-release.apk` 실기기 설치 완료)**
 > - **마스터 구현 계획:** `MOBILE_IMPLEMENTATION_PLAN.md` (본 문서)
 > - **Mac · iOS(+공통 코드 & Android 선행) 개발 작업지시서:** [SPEC_MOBILE_IOS.md](./SPEC_MOBILE_IOS.md)
 > - **Windows · Android 빌드/배포 실전 가이드:** [GUIDE_WIN_ANDROID.md](./GUIDE_WIN_ANDROID.md)
@@ -138,7 +138,7 @@ flowchart TD
 - [x] `npm run build` 실행 시 `dist/index.html`의 에셋 경로가 `/wine-forest/`로 유지되고 `dist/sw.js`, `dist/manifest.webmanifest`가 정상 생성되는가?
 - [x] `BUILD_TARGET=capacitor` 미지정 상태에서 `Capacitor.isNativePlatform()`이 `false`로 평가되어 웹 브라우저가 항상 `WebGisAuthAdapter`를 타는가?
 - [x] 웹 환경에서 `nativeBridge.ts`의 StatusBar / App / Filesystem / Share 호출이 동적/안전 가드로 스킵되거나 기존 Blob 다운로드로 폴백되는가?
-- [x] 기존 테스트 스위트 + 모바일 어댑터 및 전수 감사 회귀 테스트(`privacyMode`, `schemaValidation`, `statsCalculator`, `syncConflict`, `wineStore`, `phase2`, `authAdapter`, `auditFixes` — 총 **8개 스위트 / 59개 테스트**)가 단 1건의 회귀 없이 모두 통과하는가?
+- [x] 기존 테스트 스위트 + 모바일 어댑터 · 전수 감사 · 무서버 공유 링크 회귀 테스트(`privacyMode`, `schemaValidation`, `statsCalculator`, `syncConflict`, `wineStore`, `phase2`, `authAdapter`, `auditFixes`, `shareLink` — 총 **9개 스위트 / 69개 테스트**)가 단 1건의 회귀 없이 모두 통과하는가?
 - [x] `.github/workflows/deploy.yml`의 `npm run typecheck && npm run test && npm run build` CI 파이프라인이 추가 환경변수나 네이티브 도구 없이 그대로 통과하는가?
 
 ---

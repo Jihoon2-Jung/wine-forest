@@ -55,12 +55,16 @@
 
 - **Milestone 1~4 (웹앱 풀스택 SPA/PWA):** 완료 (`src/` 전체 + `public/` 아이콘 + Tailwind/CSS 변수)
 - **Milestone 5 (엑셀 마이그레이션):** `일회성 로컬 이관 스크립트` 실행 → `wine_db.json` (초기 이관 완료 · 3단계 산지 · 미분류 0건 · 소비일 결측 0건 · 선반 24개) 및 `migration_review.md` 생성, Zod 통과
-- **Milestone 6 (CI/CD · 테스트 · 실배포):** `.github/workflows/deploy.yml`(`build`/`deploy` 2개 Job 분리, `actions/upload-pages-artifact@v4`, `actions/deploy-pages@v4`), `README.md`, `npm run typecheck` (0 errors), `npm run test` (**8 suites / 59 tests pass**, `authAdapter.test.ts` · `auditFixes.test.tsx` 회귀 스위트 포함), `npm run build` (0 warnings, PWA `dist/sw.js` 생성), `npm run build:mobile` (Capacitor `./` 번들 · Web GIS 제거 · SW 미생성), GitHub Pages 프로덕션 배포 및 PC·스마트폰 Google Drive 동기화 검증 완료
+- **Milestone 6 (CI/CD · 테스트 · 실배포):** `.github/workflows/deploy.yml`(`build`/`deploy` 2개 Job 분리, `actions/upload-pages-artifact@v4`, `actions/deploy-pages@v4`), `README.md`, `npm run typecheck` (0 errors), `npm run test` (**9 suites / 69 tests pass**, `authAdapter.test.ts` · `auditFixes.test.tsx` · `shareLink.test.tsx` 포함), `npm run build` (0 warnings, PWA `dist/sw.js` 생성), `npm run build:mobile` (Capacitor `./` 번들 · Web GIS 제거 · SW 미생성), GitHub Pages 프로덕션 배포 및 PC·스마트폰 Google Drive 동기화 검증 완료
 - **Phase 2 (2-1 · 2-2 · 2-3A · 2-3B 전체 완료):**
   - **2-1 적정 음용 시기:** `drinkingWindowStart`/`End` 입력·편집(`start <= end` 검증), Wine Spectator·Wine Advocate 지역·빈티지 차트 기반 신규 입력 자동 추천(`drinkingWindowEstimator.ts` — 부르고뉴 빌라쥬/그랑크뤼 정밀 분리 · `꼬르똥`/`샤또뇌프` 한글 표기 통일 · `RO`/`SP` 조기 분기) 및 기존 미입력 와인 1클릭 일괄 자동 채우기, 4단계 상태 배지, 목록 1탭 `지금 적기` 필터, 통계 대시보드 음용 적기 드릴다운 카드
   - **2-2 별점 · 시음노트 · 동반자:** 5.0 만점 0.5단위 별점(`StarRating` — `schemaVersion: 1` 하위호환을 위해 Zod `0..100` 유지, 5점 초과 레거시 점수는 `92점` 표기), `QuickConsumeModal` 접이식 상세 시음 기록, `HistoryPage` 평점 필터·평점순 정렬, `WineDetailSheet` 평균 별점, 프라이버시 모드 2-A 정책(`tastingNote`·`companions` 유지 / `memo` 마스킹)
   - **2-3A 라벨 & 시음 사진 파이프라인:** `imageProcessor.ts`(500px/1024px WebP 자동 압축), `photoPicker.ts`(웹/Capacitor 단일 진입점), Drive `photos/` + IndexedDB `photoCache` v2 오프라인 캐시, `authRevision` 재인증 후 미캐싱 사진 자동 재로딩, `<WineThumbnail />` 실이미지, 라벨 등록/교체/삭제(빈티지 무관 `(와인명, 색상)` 공통 적용 및 신규 빈티지 상속), 시음 사진 최대 3장 첨부 및 `PhotoLightbox` 확대 뷰어
   - **2-3B 기존 와인 라벨 일괄 검색·컨펌 도구:** `scripts/label_review_tool.py`(빈티지 통합 `(와인명, 색상)` 그룹화 · XSS 방어 DOM 바인딩 · IndexedDB 대용량 자동 저장 및 용량 초과 경고 · `--local-dir` 500px WebP 압축 강제 · 짧은 파일명 오매칭 가드) + 웹앱 설정 화면 `[승인된 라벨 일괄 적용]`(3버튼 `<BottomSheet>` 중복 처리 모달 · 부분 라벨 그룹 1라벨 동기화 · 401/429 즉시 중단 및 부분 커밋)
+- **무서버 읽기 전용 와인 리스트 공유 ([SPEC_SHARE_LINK.md](./SPEC_SHARE_LINK.md)) 완료 ✅:**
+  - `src/services/share/shareCodec.ts`(컴팩트 v1 사전·튜플 직렬화, `deflate-raw` `z.`/`u.` Base64URL, 512KB Zip-bomb 스트리밍 상한·Zod 검증, 프라이버시 체크박스 해제 항목 데이터 레벨 원천 제거, 소프트 만료, Capacitor→공개 GitHub Pages URL 치환, 메신저용 텍스트 목록 포맷터)
+  - `src/services/native/nativeBridge.ts`(`copyTextToClipboard` · `canUseNativeShareSheet` · `shareTextOrUrl`), `ShareListModal.tsx`(프라이버시 4종 기본 OFF · 실시간 URL 길이 게이지 · 복사/OS 공유/텍스트 복사/미리보기), `InventoryPage.tsx`(`리스트 공유` 진입점)
+  - `App.tsx`(`HashRouter` 최상위 승격 + `/share` 무인증 선분기) 및 `SharedListPage.tsx`(비로그인 즉시 열람, 독립 검색/색상/적기/정렬/로컬 금액 가리기, 만료/오류 안전 화면), `tests/shareLink.test.tsx` 10개 테스트 전원 통과
 
 ---
 

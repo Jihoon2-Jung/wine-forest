@@ -254,22 +254,25 @@ wine-forest/
 │   ├── components/
 │   │   ├── common/                 # PriceText(FxNoteText·MemoText 포함), WineColorBadge, WineThumbnail, StarRating, PhotoLightbox, BottomSheet(공용 모달 스택), ConfirmDialog, ConflictModal, SyncBadge, ToastBar
 │   │   ├── layout/                 # AppShell, TopHeader, BottomNav, DesktopSidebar, FabButton
-│   │   ├── wines/                  # WineGroupCard, WineDetailSheet, BottleRow, FilterBar, QuickAddModal, QuickConsumeModal
+│   │   ├── wines/                  # WineGroupCard, WineDetailSheet, BottleRow, FilterBar, QuickAddModal, QuickConsumeModal, ShareListModal
 │   │   ├── cellar/                 # ShelfCard, ShelfDetailDrawer, MoveBottlePicker, ShelfConfigModal (배치도는 CellarMapPage 통합)
 │   │   ├── history/                # HistoryCard (월별 타임라인·평점 정렬·더보기는 HistoryPage 통합)
 │   │   └── stats/                  # KpiGrid, ColorDonutChart, RegionBarChart, TrendChart, PriceDistChart
 │   ├── pages/
-│   │   ├── InventoryPage.tsx       # 탭 1 (기본 홈)
+│   │   ├── InventoryPage.tsx       # 탭 1 (기본 홈 + [리스트 공유] 진입점)
 │   │   ├── CellarMapPage.tsx       # 탭 2 (물리적 수직 셀러 캐비닛 배치도)
 │   │   ├── HistoryPage.tsx         # 탭 3 (월별 타임라인 + 평점순 정렬 + 최근 50건 점진적 로딩)
 │   │   ├── StatsPage.tsx           # 탭 4 (React.lazy 분리 + 음용 적기 현황 카드)
 │   │   ├── SettingsPage.tsx        # 설정/백업/임포트/로컬↔Drive 모드 전환
-│   │   └── OnboardingView.tsx      # 최초 실행 (Google Drive / 로컬 테스트 / JSON Import)
+│   │   ├── OnboardingView.tsx      # 최초 실행 (Google Drive / 로컬 테스트 / JSON Import)
+│   │   └── SharedListPage.tsx      # 무인증 읽기 전용 공유 리스트 뷰 (#/share?d=...)
 │   ├── plugins/
 │   │   └── googleDriveAuth.ts      # Capacitor 네이티브 GoogleDriveAuth 플러그인 TS 브릿지
 │   ├── services/
 │   │   ├── auth/                   # googleAuth 파사드, webGisAuthAdapter, nativeGoogleAuthAdapter, types
-│   │   ├── native/nativeBridge.ts  # iOS/Android 상태바 연동 & 네이티브 JSON 공유 시트 브릿지
+│   │   ├── native/nativeBridge.ts  # iOS/Android 시스템 바·뒤로가기·라이프사이클 연동, 네이티브 JSON 공유 시트, 클립보드/URL·텍스트 공유 브릿지
+│   │   ├── share/
+│   │   │   └── shareCodec.ts       # 무서버 공유 스냅샷 빌더, WireV1, deflate-raw/Base64URL, 512KB 상한·Zod 디코더, 텍스트 포맷터
 │   │   ├── domain/
 │   │   │   ├── wineHelpers.ts      # 4중 키 매칭, 3단계 산지 포맷, 음용 적기 판정, FIFO/빈티지 정렬
 │   │   │   └── drinkingWindowEstimator.ts # 지역·등급·색상·빈티지 작황 기반 음용 적기 자동 추천 엔진
@@ -306,11 +309,13 @@ wine-forest/
 │   ├── wineStore.test.ts           # 4중 키 병합·고아 마스터 정리·선반 이름/삭제·deviceLabel·소비/복원 검증
 │   ├── phase2.test.tsx             # Phase 2 음용 적기·별점/시음노트·이미지 리사이징·라벨 일괄 적용·안정화 회귀 검증
 │   ├── authAdapter.test.ts         # 웹 GIS 호환·네이티브 무음 복원·401 재시도·동시 갱신 dedupe 검증
-│   └── auditFixes.test.tsx         # 전수 감사 회귀 검증(스키마·도메인·통계·동시성·복원·모달스택·프라이버시·스테일상태)
+│   ├── auditFixes.test.tsx         # 전수 감사 회귀 검증(스키마·도메인·통계·동시성·복원·모달스택·프라이버시·스테일상태)
+│   └── shareLink.test.tsx          # 무서버 공유 코덱·프라이버시 원천 제거·512KB/Zod 방어·만료·ShareListModal·SharedListPage 검증
 ├── docs/
 │   ├── SPEC_1_UI_ARCH.md           # 웹 작업지시서 1부
 │   ├── SPEC_2_DATA_EXEC.md         # 웹 작업지시서 2부
 │   ├── IMPLEMENTATION_PLAN.md      # 최종 구현 계획·완료 명세·안정화/감사 현황
+│   ├── SPEC_SHARE_LINK.md          # 무서버 읽기 전용 리스트 공유 링크 작업지시서
 │   ├── MOBILE_IMPLEMENTATION_PLAN.md # 모바일(iOS/Android) 마스터 계획
 │   ├── SPEC_MOBILE_IOS.md          # Mac·iOS 개발 작업지시서
 │   └── GUIDE_WIN_ANDROID.md        # Windows Android 빌드 실전 가이드
@@ -381,7 +386,7 @@ Antigravity(Gemini Neon)는 아래 **6개 마일스톤**을 순서대로 완료�
 
 ## 10. 최종 완료 기준 (Definition of Done — 검증 완료)
 
-- [x] `npm run test` 모든 단위 테스트(스키마, 230218 통계·3단계 산지, 충돌 감지·주 1회 백업, 프라이버시 마스킹, 스토어 도메인 변이, Phase 2·안정화 회귀, 웹/네이티브 인증 어댑터, 전수 감사 및 Android/공통 회귀) 100% 통과 (**8 suites / 59 tests**)
+- [x] `npm run test` 모든 단위 테스트(스키마, 230218 통계·3단계 산지, 충돌 감지·주 1회 백업, 프라이버시 마스킹, 스토어 도메인 변이, Phase 2·안정화 회귀, 웹/네이티브 인증 어댑터, 전수 감사 및 Android/공통 회귀, 무서버 공유 링크) 100% 통과 (**9 suites / 69 tests**)
 - [x] `useWineStore` 포그라운드 복귀 조용한 자동 동기화(`syncOnForegroundResume` 30초 쓰로틀 + `syncNow({ silent: true })`, 미동기화·충돌 시 Pull 차단) 및 도메인 변이(`addBottles`/`consumeOrGiftBottle`/`updateTastingRecord`) `CommitResult` 반환 검증 완료
 - [x] `npm run build` TypeScript/Vite 에러 및 경고 없이 완료, PWA 서비스워커(`dist/sw.js`) 정상 생성
 - [x] 모바일(`390×844`)과 데스크톱(`1440×900`) 양쪽에서 라이트/다크 모드 모두 대비·가독성 결함 없음 (화이트 연노랑 `#F3EED4`/`#EFEAD0` 다크 텍스트 대비 포함)

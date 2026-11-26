@@ -209,3 +209,106 @@ export async function initAppLifecycleListeners(
     };
   }
 }
+
+/**
+ * 클립보드 텍스트 복사 (Clipboard API 우선 + 구형/WebView textarea 폴백)
+ */
+export async function copyTextToClipboard(text: string): Promise<boolean> {
+  if (!text) return false;
+  if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
+    try {
+      await navigator.clipboard.writeText(text);
+      return true;
+    } catch {
+      // fallback below
+    }
+  }
+  if (typeof document === 'undefined') {
+    return false;
+  }
+  const textarea = document.createElement('textarea');
+  textarea.value = text;
+  textarea.setAttribute('readonly', 'true');
+  textarea.style.position = 'fixed';
+  textarea.style.left = '-9999px';
+  textarea.style.top = '0';
+  textarea.style.opacity = '0';
+  document.body.appendChild(textarea);
+  textarea.select();
+  try {
+    return document.execCommand('copy');
+  } catch {
+    return false;
+  } finally {
+    textarea.remove();
+  }
+}
+
+/**
+ * OS 네이티브 공유 시트 호출 가능 여부 (Capacitor 네이티브 또는 Web Share API)
+ */
+export function canUseNativeShareSheet(): boolean {
+  return (
+    Capacitor.isNativePlatform() ||
+    (typeof navigator !== 'undefined' && typeof navigator.share === 'function')
+  );
+}
+
+/**
+ * 공유 링크 또는 텍스트를 OS 공유 시트로 전송 (미지원/실패 시 클립보드 복사로 안전 폴백)
+ */
+export async function shareTextOrUrl(params: {
+  title: string;
+  text?: string;
+  url?: string;
+}): Promise<'shared' | 'copied' | 'cancelled'> {
+  const fallbackText = params.url ?? params.text ?? '';
+
+  if (Capacitor.isNativePlatform()) {
+    try {
+      const { Share } = await import('@capacitor/share');
+      await Share.share({
+        title: params.title,
+        text: params.text,
+        url: params.url,
+        dialogTitle: params.title,
+      });
+      return 'shared';
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err ?? '');
+      if (/cancel|abort/i.test(msg)) {
+        return 'cancelled';
+      }
+      if (fallbackText && (await copyTextToClipboard(fallbackText))) {
+        return 'copied';
+      }
+      throw err;
+    }
+  }
+
+  if (typeof navigator !== 'undefined' && typeof navigator.share === 'function') {
+    try {
+      await navigator.share({
+        title: params.title,
+        text: params.text,
+        url: params.url,
+      });
+      return 'shared';
+    } catch (err) {
+      const name = err instanceof Error ? err.name : '';
+      const msg = err instanceof Error ? err.message : String(err ?? '');
+      if (name === 'AbortError' || /cancel|abort/i.test(msg)) {
+        return 'cancelled';
+      }
+      if (fallbackText && (await copyTextToClipboard(fallbackText))) {
+        return 'copied';
+      }
+      throw err;
+    }
+  }
+
+  if (fallbackText && (await copyTextToClipboard(fallbackText))) {
+    return 'copied';
+  }
+  throw new Error('클립보드에 복사할 수 없습니다. 브라우저 권한을 확인해 주세요.');
+}

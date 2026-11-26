@@ -9,6 +9,9 @@ import { OnboardingView } from '@/pages/OnboardingView';
 import { SettingsPage } from '@/pages/SettingsPage';
 
 const StatsPage = lazy(() => import('@/pages/StatsPage'));
+const SharedListPage = lazy(() =>
+  import('@/pages/SharedListPage').then((m) => ({ default: m.SharedListPage })),
+);
 
 function PageLoader() {
   return (
@@ -18,14 +21,9 @@ function PageLoader() {
   );
 }
 
-export function App() {
-  const hydrate = useWineStore((s) => s.hydrate);
+function PrivateAppRoutes() {
   const isHydrated = useWineStore((s) => s.isHydrated);
   const db = useWineStore((s) => s.db);
-
-  useEffect(() => {
-    void hydrate();
-  }, [hydrate]);
 
   if (!isHydrated) {
     return (
@@ -45,24 +43,46 @@ export function App() {
   }
 
   return (
+    <AppShell>
+      <Routes>
+        <Route path="/" element={<InventoryPage />} />
+        <Route path="/cellar" element={<CellarMapPage />} />
+        <Route path="/history" element={<HistoryPage />} />
+        <Route
+          path="/stats"
+          element={
+            <Suspense fallback={<PageLoader />}>
+              <StatsPage />
+            </Suspense>
+          }
+        />
+        <Route path="/settings" element={<SettingsPage />} />
+        <Route path="*" element={<Navigate to="/" replace />} />
+      </Routes>
+    </AppShell>
+  );
+}
+
+export function App() {
+  const hydrate = useWineStore((s) => s.hydrate);
+
+  useEffect(() => {
+    void hydrate();
+  }, [hydrate]);
+
+  return (
     <HashRouter>
-      <AppShell>
-        <Routes>
-          <Route path="/" element={<InventoryPage />} />
-          <Route path="/cellar" element={<CellarMapPage />} />
-          <Route path="/history" element={<HistoryPage />} />
-          <Route
-            path="/stats"
-            element={
-              <Suspense fallback={<PageLoader />}>
-                <StatsPage />
-              </Suspense>
-            }
-          />
-          <Route path="/settings" element={<SettingsPage />} />
-          <Route path="*" element={<Navigate to="/" replace />} />
-        </Routes>
-      </AppShell>
+      <Routes>
+        <Route
+          path="/share"
+          element={
+            <Suspense fallback={<PageLoader />}>
+              <SharedListPage />
+            </Suspense>
+          }
+        />
+        <Route path="/*" element={<PrivateAppRoutes />} />
+      </Routes>
     </HashRouter>
   );
 }

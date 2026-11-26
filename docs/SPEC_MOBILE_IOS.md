@@ -1,7 +1,7 @@
 # JH Wine Forest — 모바일(iOS 중심 + 공통/Android 선행) 개발 작업지시서 (`SPEC_MOBILE_IOS.md`)
 
 > **문서 안내:** 본 문서는 [MOBILE_IMPLEMENTATION_PLAN.md](./MOBILE_IMPLEMENTATION_PLAN.md)의 세부 실행 명세서입니다.
-> - **상태:** **M1~M6 완료 + iOS·Android 전수 감사 안정화 패치 완료 (2026-11-26: Part A 46건 + Android/공통 감사 10건 전량 반영 · `8개 스위트 / 59개 테스트` 통과 · iOS `.ipa` 재빌드 확인 + Android `v1.0.1 / versionCode 2` Release APK 실기기 설치 완료, Windows Android 작업은 `feat/android-v1` 브랜치 분리 푸시)**
+> - **상태:** **M1~M6 완료 + iOS·Android 전수 감사 안정화 패치 및 `main` 통합 완료 (2026-11-26: Part A 46건 + Android/공통 감사 10건 + 무서버 공유 링크 전량 반영 · `9개 스위트 / 69개 테스트` 통과 · iOS `CapApp-SPM` 5개 플러그인 동기화 및 `.ipa` 빌드 + Android `v1.0.1 / versionCode 2` Release APK 실기기 설치 완료)**
 > Mac 환경에서 **공통 코드(`src/`) 리팩토링, iOS 네이티브(`ios/`) 구현, Android 선행 스캐폴딩(`android/`) 작성**까지 누락 없이 구현·검증할 수 있도록 상세 지침을 제공합니다.
 > Windows PC에서의 Android Keystore 생성 및 빌드는 [GUIDE_WIN_ANDROID.md](./GUIDE_WIN_ANDROID.md)로 이어집니다.
 
@@ -509,7 +509,7 @@ Intel Mac에서는 Xcode 27(Apple Silicon 전용) 설치가 불가능하므로, 
 | 마일스톤 | 선행 조건 | 작업 범위 | 자가 검증 명령 및 통과 기준 |
 | :---: | :---: | :--- | :--- |
 | **M1** | 없음 | `.gitignore`, `.gitattributes`, `package.json`, `vite.config.ts`, `capacitor.config.ts` | `npm run build` (`dist/sw.js` 생성 + `/wine-forest/`) 및 `npm run build:mobile` (`dist/sw.js` 미생성 + `./`) 모두 성공 |
-| **M2** | M1 | `googleDriveAuth.ts`, `src/services/auth/*`, `nativeBridge.ts`, `googleDriveAdapter.ts`, `useWineStore.ts`, `photoPicker.ts`(`@capacitor/camera` 분기 연결), UI(`BottomSheet`, `ConfirmDialog`, `AppShell`, `OnboardingView`, `SettingsPage`), `tests/authAdapter.test.ts`, `tests/auditFixes.test.tsx` | `npm run typecheck` (에러 0건), `npm run test` (전체 **8개 스위트 / 59개 테스트** 100% 통과) |
+| **M2** | M1 | `googleDriveAuth.ts`, `src/services/auth/*`, `nativeBridge.ts`, `googleDriveAdapter.ts`, `useWineStore.ts`, `photoPicker.ts`(`@capacitor/camera` 분기 연결), UI(`BottomSheet`, `ConfirmDialog`, `AppShell`, `OnboardingView`, `SettingsPage`), `tests/authAdapter.test.ts`, `tests/auditFixes.test.tsx`, `tests/shareLink.test.tsx` | `npm run typecheck` (에러 0건), `npm run test` (전체 **9개 스위트 / 69개 테스트** 100% 통과) |
 | **M3** | M2 | `npx cap add ios --packagemanager SPM`, `npx cap add android`, `ios/` Swift 플러그인·`Local.xcconfig.example`, `android/` Kotlin 플러그인·`MainActivity`·`build.gradle` 작성 후 Git 커밋·푸시 | `npx cap sync android` 성공, `git status`에 개인 설정/키스토어 미포함 확인 |
 | **M4** | **Xcode 설치** | Xcode 초기 세팅, `GoogleSignIn-iOS` SPM 연결, `Local.xcconfig` 작성, Google Cloud iOS Client 추가 및 프로덕션 게시 | `xcodebuild -project ios/App/App.xcodeproj -scheme App -sdk iphonesimulator build` 에러 0건 |
 | **M5** | M4 + iPhone | 무료 Personal Team으로 iPhone 실기기 USB 설치 및 실사용 E2E 검증 | ① 최초 1회 로그인 후 `wine_db.json` 로드 ② 앱 강제 종료 후 재실행 시 로그인 팝업 없이 자동 동기화 ③ JSON 공유 시트 정상 동작 ④ 다크/라이트 상태바 전환 정상 |

@@ -1,14 +1,52 @@
-import { LayoutGrid, List, Plus, RotateCcw, Wine } from 'lucide-react';
-import { useDeferredValue, useMemo, useState } from 'react';
-import type { BottleInstance } from '@/types/schema';
+import { LayoutGrid, List, Plus, RotateCcw, Share2, Wine } from 'lucide-react';
+import { lazy, Suspense, useDeferredValue, useMemo, useState } from 'react';
+import { WINE_COLOR_LABELS, type BottleInstance } from '@/types/schema';
 import { calculateWineGroupPrice } from '@/services/analytics/statsCalculator';
 import { compareVintage, getDrinkingWindowStatus } from '@/services/domain/wineHelpers';
-import { useWineStore } from '@/store/useWineStore';
+import { useWineStore, type InventoryFilters } from '@/store/useWineStore';
 import { PriceText } from '@/components/common/PriceText';
 import { FilterBar } from '@/components/wines/FilterBar';
 import { QuickConsumeModal } from '@/components/wines/QuickConsumeModal';
 import { WineDetailSheet } from '@/components/wines/WineDetailSheet';
 import { WineGroupCard, type WineGroupItem } from '@/components/wines/WineGroupCard';
+
+const ShareListModal = lazy(() =>
+  import('@/components/wines/ShareListModal').then((m) => ({ default: m.ShareListModal })),
+);
+
+const DRINKING_WINDOW_FILTER_LABELS: Record<
+  Exclude<InventoryFilters['drinkingWindow'], ''>,
+  string
+> = {
+  ready_now: '지금 적기',
+  closing_soon: '마감 임박',
+  past_peak: '적기 경과',
+  too_young: '숙성 중',
+};
+
+export function buildFilterSummaryText(filters: InventoryFilters): string | undefined {
+  const parts: string[] = [];
+  if (filters.colors.length > 0) {
+    parts.push(filters.colors.map((c) => WINE_COLOR_LABELS[c]).join('·'));
+  }
+  const originParts = [filters.country, filters.region, filters.subRegion].filter(Boolean);
+  if (originParts.length > 0) {
+    parts.push(originParts.join(' · '));
+  }
+  if (filters.zone) {
+    parts.push(filters.zone === '__UNASSIGNED__' ? '보관 위치 미지정' : filters.zone);
+  }
+  if (filters.drinkingWindow) {
+    parts.push(DRINKING_WINDOW_FILTER_LABELS[filters.drinkingWindow]);
+  }
+  if (filters.query.trim()) {
+    parts.push(`검색 "${filters.query.trim()}"`);
+  }
+  if (filters.includeOutOfStock) {
+    parts.push('품절 포함');
+  }
+  return parts.length > 0 ? parts.join(' · ') : undefined;
+}
 
 export function InventoryPage() {
   const db = useWineStore((s) => s.db);
@@ -19,6 +57,9 @@ export function InventoryPage() {
   const [selectedWineId, setSelectedWineId] = useState<string | null>(null);
   const [quickConsumeWineId, setQuickConsumeWineId] = useState<string | null>(null);
   const [compactView, setCompactView] = useState(false);
+  const [isShareOpen, setIsShareOpen] = useState(false);
+
+  const filterSummary = useMemo(() => buildFilterSummaryText(filters), [filters]);
 
   const deferredQuery = useDeferredValue(filters.query.trim().toLowerCase());
 
@@ -195,27 +236,41 @@ export function InventoryPage() {
           </span>
         </div>
 
-        <div className="hidden items-center gap-1 rounded-xl border border-subtle bg-elevated p-0.5 md:flex">
+        <div className="flex items-center gap-2">
           <button
             type="button"
-            onClick={() => setCompactView(false)}
-            className={`inline-flex items-center gap-1 rounded-lg px-2.5 py-1 text-xs font-semibold transition-colors ${
-              !compactView ? 'bg-surface text-primary shadow-sm' : 'text-secondary hover:text-primary'
-            }`}
+            disabled={groups.length === 0}
+            onClick={() => setIsShareOpen(true)}
+            className="inline-flex items-center gap-1.5 rounded-xl border border-forest/30 bg-forest/10 px-3 py-1.5 text-xs font-bold text-forest transition-colors hover:bg-forest hover:text-white disabled:cursor-not-allowed disabled:opacity-45"
+            title="현재 필터링된 와인 리스트를 읽기 전용 링크로 공유"
           >
-            <LayoutGrid className="h-3.5 w-3.5" />
-            <span>카드</span>
+            <Share2 className="h-3.5 w-3.5" />
+            <span className="sm:hidden">공유</span>
+            <span className="hidden sm:inline">리스트 공유</span>
           </button>
-          <button
-            type="button"
-            onClick={() => setCompactView(true)}
-            className={`inline-flex items-center gap-1 rounded-lg px-2.5 py-1 text-xs font-semibold transition-colors ${
-              compactView ? 'bg-surface text-primary shadow-sm' : 'text-secondary hover:text-primary'
-            }`}
-          >
-            <List className="h-3.5 w-3.5" />
-            <span>컴팩트</span>
-          </button>
+
+          <div className="hidden items-center gap-1 rounded-xl border border-subtle bg-elevated p-0.5 md:flex">
+            <button
+              type="button"
+              onClick={() => setCompactView(false)}
+              className={`inline-flex items-center gap-1 rounded-lg px-2.5 py-1 text-xs font-semibold transition-colors ${
+                !compactView ? 'bg-surface text-primary shadow-sm' : 'text-secondary hover:text-primary'
+              }`}
+            >
+              <LayoutGrid className="h-3.5 w-3.5" />
+              <span>카드</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setCompactView(true)}
+              className={`inline-flex items-center gap-1 rounded-lg px-2.5 py-1 text-xs font-semibold transition-colors ${
+                compactView ? 'bg-surface text-primary shadow-sm' : 'text-secondary hover:text-primary'
+              }`}
+            >
+              <List className="h-3.5 w-3.5" />
+              <span>컴팩트</span>
+            </button>
+          </div>
         </div>
       </div>
 
@@ -292,6 +347,18 @@ export function InventoryPage() {
         bottles={quickConsumeTarget?.bottles ?? []}
         onClose={() => setQuickConsumeWineId(null)}
       />
+
+      {/* 읽기 전용 리스트 공유 모달 (열릴 때 지연 로드) */}
+      {isShareOpen && (
+        <Suspense fallback={null}>
+          <ShareListModal
+            open={isShareOpen}
+            onClose={() => setIsShareOpen(false)}
+            groups={groups}
+            filterSummary={filterSummary}
+          />
+        </Suspense>
+      )}
     </div>
   );
 }

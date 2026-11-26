@@ -1,7 +1,7 @@
 # JH Wine Forest — Windows PC Android 빌드 · 서명 · 배포 실전 가이드 (`GUIDE_WIN_ANDROID.md`)
 
 > **문서 목적:** 본 가이드는 **단일 Git 저장소(`wine-forest`) + PC 이원화 빌드 전략(Mac = iOS / Windows = Android)**에 따라, **Windows PC에서 Android 앱을 구현·빌드·서명·실기기 설치**하기 위한 단독 실행형 매뉴얼입니다.
-> - **상태:** **WINDOWS ANDROID RELEASE APK v1.0.1 (versionCode 2) VERIFIED (2026-11-26) — Windows PC(JDK 21 + Android API 36)에서 `@capacitor/android@8.6.2` · `@capacitor/app@8.1.2` · `GoogleDriveAuthPlugin.kt`(이메일 영속화·`bridge.saveCall`·오프라인 네트워크 세션 보존) · `MainActivity.kt` · `SystemBars` Edge-to-Edge 상/하단바 동기화 · 포그라운드 복귀 자동 동기화 · 카메라 이중 탭 잠금 · 검증 실패 모달/사진 보존 · Android `.json` 피커 호환 · `allowBackup=false` · 조건부 Release 서명까지 전량 반영 (`8개 스위트 / 59개 테스트` 통과) 및 서명된 `app-release.apk` 실기기 설치 완료.**
+> - **상태:** **WINDOWS ANDROID RELEASE APK v1.0.1 (versionCode 2) VERIFIED & `main` 통합 완료 (2026-11-26) — Windows PC(JDK 21 + Android API 36)에서 `@capacitor/android@8.6.2` · `@capacitor/app@8.1.2` · `GoogleDriveAuthPlugin.kt`(이메일 영속화·`bridge.saveCall`·오프라인 네트워크 세션 보존) · `MainActivity.kt` · `SystemBars` Edge-to-Edge 상/하단바 동기화 · 포그라운드 복귀 자동 동기화 · 카메라 이중 탭 잠금 · 검증 실패 모달/사진 보존 · Android `.json` 피커 호환 · `allowBackup=false` · 조건부 Release 서명까지 전량 반영 및 서명된 `app-release.apk` 실기기 설치 완료 (`main` 통합 + 무서버 공유 링크 포함 `9개 스위트 / 69개 테스트` 통과).**
 >
 > **전제 조건:** `feat/android-v1` 브랜치에 `@capacitor/android@8.6.2` · `@capacitor/app@8.1.2` · `android/` · `GoogleDriveAuthPlugin.kt` · `MainActivity.kt` · `build.gradle` 조건부 Release 서명 설정까지 모두 구현·검증되어 있습니다. *(Mac에서 iOS 작업을 `main`에서 동시 진행 중인 동안에는 `feat/android-v1` 브랜치로 분리 관리하며, Mac iOS 푸시 완료 후 `main`과 통합합니다. 전체 설계는 [MOBILE_IMPLEMENTATION_PLAN.md](./MOBILE_IMPLEMENTATION_PLAN.md) 참고)*
 
