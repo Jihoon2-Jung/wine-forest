@@ -255,7 +255,7 @@ export interface AuthAdapter {
    * `await clearAccessToken()` (내부적으로 네이티브 `signOut()` 호출) 실행 후 `authUserEmail: null` 초기화.
 6. **UI 반영:**
    * [OnboardingView.tsx](../src/pages/OnboardingView.tsx): `clientIdReady = hasGoogleClientId()` 가드와 안내 문구에서 네이티브 환경(`isNativeAuth() === true`)이면 항상 Google 로그인 버튼을 활성화합니다.
-   * [SettingsPage.tsx](../src/pages/SettingsPage.tsx): `storageMode === 'google_drive'` 카드에 연결된 계정 이메일(`authUserEmail`)과 `"모바일 자동 갱신 활성"` 배지를 표시합니다. 네이티브에서도 토큰 복원 실패 시 기존 재인증 카드가 정상 동작합니다.
+   * [SettingsPage.tsx](../src/pages/SettingsPage.tsx): `storageMode === 'google_drive'` 카드에 연결된 계정 이메일(`authUserEmail`)과 좁은 모바일 화면에서도 글자 깨짐 없이 보이도록 2줄 줄바꿈(`모바일 앱` / `자동 갱신`, `shrink-0 whitespace-nowrap`) 상태 배지를 표시합니다. 네이티브에서도 토큰 복원 실패 시 기존 재인증 카드가 정상 동작합니다.
 7. **`detectDeviceLabel()` 네이티브 앱 구분:**
    * `commitMutation()` 시 기록되는 `metadata.deviceLabel` 생성 함수(`detectDeviceLabel()`) 최상단에 `Capacitor.isNativePlatform()` 분기를 추가해 네이티브 실행 시에는 `Capacitor.getPlatform() === 'ios' ? 'iOS App' : 'Android App'`을 반환하도록 합니다. (웹 브라우저 `iPhone Safari`/`Android Chrome`과 네이티브 앱 수정 이력을 명확히 구분)
 

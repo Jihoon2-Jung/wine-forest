@@ -220,18 +220,18 @@ export function SettingsPage() {
       {/* 1. 저장소 모드 & 동기화 상태 */}
       <section className="space-y-4 rounded-2xl border border-subtle bg-surface p-5 shadow-card">
         <div className="flex items-center justify-between gap-2">
-          <div className="flex items-center gap-2">
+          <div className="flex min-w-0 items-center gap-2">
             {storageMode === 'google_drive' ? (
-              <Cloud className="h-5 w-5 text-forest" />
+              <Cloud className="h-5 w-5 shrink-0 text-forest" />
             ) : (
-              <FlaskConical className="h-5 w-5 text-gold" />
+              <FlaskConical className="h-5 w-5 shrink-0 text-gold" />
             )}
-            <div>
+            <div className="min-w-0">
               <h3 className="text-sm font-bold text-primary">
                 {storageMode === 'google_drive' ? 'Google Drive 동기화 모드' : '로컬 테스트 모드'}
               </h3>
               {storageMode === 'google_drive' && authUserEmail && (
-                <p className="text-[11px] font-medium text-forest">{authUserEmail}</p>
+                <p className="truncate text-[11px] font-medium text-forest">{authUserEmail}</p>
               )}
               <p className="text-xs text-secondary tabular-nums">
                 마지막 저장:{' '}
@@ -245,7 +245,7 @@ export function SettingsPage() {
           </div>
 
           <span
-            className={`rounded-full px-2.5 py-1 text-[11px] font-bold ${
+            className={`shrink-0 whitespace-nowrap rounded-2xl px-2.5 py-1 text-center text-[11px] font-bold leading-tight ${
               storageMode === 'local_test'
                 ? 'bg-gold/15 text-gold'
                 : tokenActive || nativeAutoRefreshReady
@@ -253,13 +253,19 @@ export function SettingsPage() {
                   : 'bg-elevated text-secondary'
             }`}
           >
-            {storageMode === 'local_test'
-              ? 'IndexedDB 로컬'
-              : nativeAutoRefreshReady
-                ? '모바일 자동 갱신 활성'
-                : tokenActive
-                  ? '토큰 유효'
-                  : '재인증 필요'}
+            {storageMode === 'local_test' ? (
+              'IndexedDB 로컬'
+            ) : nativeAutoRefreshReady ? (
+              <>
+                모바일 앱
+                <br />
+                자동 갱신
+              </>
+            ) : tokenActive ? (
+              '토큰 유효'
+            ) : (
+              '재인증 필요'
+            )}
           </span>
         </div>
 
