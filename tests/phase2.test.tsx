@@ -430,7 +430,7 @@ describe('Code Review Regression Fixes — Estimator, HistoryCard Edit, & Reauth
     expect(chassagneVillage).toEqual(expect.objectContaining({ start: 2021, end: 2029 }));
     expect(chassagneVillage?.basis).toContain('1er/주요 마을');
 
-    // 2) 실제 그랑크뤼(+7~+22 / +5~+16, 2018 shift -1/-1) 및 local_migration_script 한글 표기('꼬르똥', '샤또뇌프 뒤 빠쁘') 정상 매칭
+    // 2) 실제 그랑크뤼(+7~+22 / +5~+16, 2018 shift -1/-1) 및 기존 이관 데이터 한글 표기('꼬르똥', '샤또뇌프 뒤 빠쁘') 정상 매칭
     const charmesGc = estimateDrinkingWindow({
       name: 'Domaine Test Charmes-Chambertin',
       country: '프랑스',

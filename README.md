@@ -53,26 +53,13 @@ npm run preview
 
 ---
 
-## 3. 기존 엑셀(`wine_list.xlsx`) 마이그레이션 및 앱 Import
+## 3. 기존 `wine_db.json` 가져오기 및 백업 복원
 
-PC에서 Python 변환 스크립트를 실행해 `wine_db.json`과 검수 리포트(`migration_review.md`)를 생성합니다.
+기존 백업 또는 마이그레이션으로 준비한 `wine_db.json`(Schema v1)이 있는 경우 앱 내부에서 바로 임포트할 수 있습니다.
 
-```bash
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r scripts/requirements.txt
+> ⚠️ **Public 저장소 보안 주의:** 개인 와인 데이터(`*.xlsx`, `wine_db*.json`, `migration_review*.md`, `*.local.json`)는 `.gitignore`에 차단되어 있으며, 초기 1회용 엑셀 마이그레이션 스크립트는 이관 완료 후 Public 저장소 보안 유지를 위해 프로젝트 밖 개인 백업 폴더로 분리 보관했습니다.
 
-python3 local_migration_script \
-  --input ~/Documents/wine-backup/wine_list.xlsx \
-  --out-json wine_db.json \
-  --out-report migration_review.md
-# (선택) 개별 단가·수량 로컬 보정 파일이 있는 경우: --overrides ~/Documents/wine-backup/migration_overrides.local.json
-```
-
-> ⚠️ **Public 저장소 보안 주의:** 원본 `.xlsx`, `wine_db.json`, `migration_review.md`, `*.local.json`은 `.gitignore`에 차단되어 있으나, `git add -f` 같은 강제 커밋 실수를 막기 위해 **원본 엑셀과 결과물은 프로젝트 밖 개인 폴더(예: `~/Documents/wine-backup/`)에 보관**하는 것을 권장합니다.
-
-1. 생성된 `migration_review.md` 상단의 **[정합성 검증표]**(`R1` 보유 총 병수, `T1` 보유 총 금액, `V1` `23.02.18` 이후 전체 누적 지출액 — 보정 전 원본 0원 일치 및 개별 보정 내역)를 확인합니다.
-2. 웹앱을 열고 **Google 로그인 → `[📂 기존 wine_db.json 가져오기]`** (또는 설정 화면의 **JSON 파일로 덮어쓰기**)를 눌러 업로드합니다.
+1. 웹앱을 열고 **Google 로그인 → `[📂 기존 wine_db.json 가져오기]`** (또는 설정 화면의 **JSON 파일로 덮어쓰기**)를 눌러 업로드합니다.
    - ⚠️ **주의:** 최소 권한(`drive.file`) 보안 정책상 Google Drive 웹에서 직접 `JH_Wine_Forest/wine_db.json`을 업로드하면 앱이 해당 파일을 인식할 수 없습니다. 반드시 **앱 내부 Import 버튼**을 사용해 주세요.
 
 ---

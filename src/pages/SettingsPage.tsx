@@ -404,7 +404,7 @@ export function SettingsPage() {
       <section className="space-y-3 rounded-2xl border border-subtle bg-surface p-5 shadow-card">
         <h3 className="text-sm font-bold text-primary">JSON 데이터 내보내기 / 가져오기</h3>
         <p className="text-xs text-secondary">
-          <code>기존 백업 도구</code>로 변환한 <code>wine_db.json</code>을 불러오거나 현재 DB를 로컬 파일로 저장합니다.
+          기존 백업 <code>wine_db.json</code>을 불러오거나 현재 DB를 로컬 파일로 저장합니다.
         </p>
         <div className="flex flex-wrap gap-2">
           <button

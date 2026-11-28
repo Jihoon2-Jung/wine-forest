@@ -166,57 +166,16 @@ export interface StorageAdapter {
 
 ---
 
-## 6. 기존 엑셀(`wine_list.xlsx`) 마이그레이션 스크립트 명세
+## 6. 초기 엑셀 마이그레이션 정책 (완료 및 스크립트 아카이브)
 
-`일회성 로컬 이관 스크립트`와 `scripts/requirements.txt`(`openpyxl`)를 작성합니다. 기준 원본은 **`wine_list.xlsx`**(`개편본`은 사용하지 않음)입니다.
+초기 1회 엑셀 → `wine_db.json` (Schema v1) 마이그레이션 및 앱 Import가 완료되어 Google Drive(`JH_Wine_Forest/wine_db.json`)로 전환되었습니다.
 
-### 6.1 엑셀 시트 파싱 및 컬럼 매핑 (`openpyxl` `data_only=True`)
-* **`와인리스트` 시트 주요 컬럼 매핑:**
-  * `번호` (`A`) → `legacyRowNumber`
-  * `구입일` (`B`) → `purchaseDate` (`YYYY-MM-DD` 정규화; `?` 또는 파싱 불가 시 `null` + `purchaseDateUncertain = true` + 검수 리포트 기록)
-  * `구매처` (`C`) → `purchaseSource`
-  * `와인명` (`D`) → `WineMaster.name`
-  * `지역` (`E`) + `와인명` (`D`) + `비고` (`L`) → **3단계 `country` → `region` → `subRegion?` 자동 추론 엔진**으로 변환 (예: `Vin de France` → `프랑스/프랑스/(없음)`, `Echezeaux` → `프랑스/부르고뉴/에세죠`, `Talbot` → `프랑스/보르도/생줄리앙`)
-  * `색` (`F`) → `R | W | SP | SW | RO` 대문자 정규화 (예외값 시 검수 리포트 기록)
-  * `빈티지` (`G`) → 4자리 연도 문자열 또는 `NV`
-  * `수량` (`H`) → 현재 보유(`IN_STOCK`) 병 수 $N$
-  * `구매금액` (`I`) → 병당 원화 정수 `purchasePrice` (비고에 합리적 개별 단가가 명시된 행은 선택적 로컬 보정 파일 `--overrides scripts/migration_overrides.local.json`으로 개별 병 단가 분할 적용; 큰 차이/바우처 메모 행은 원가 유지 + 비고 원문 보존, `*.local.json`은 `.gitignore` 차단)
-  * `위치` (`K`) → `locationId` 매핑 (`x`는 소비완료, `xxx??`/공백/분실의심 보유 병은 미지정 `null` 처리)
-  * `비고(추가는 앞에쓸것)` (`L`) → `memo` 보관 + **좌측=최신 소비 이벤트 규칙**으로 개별 소비일·모임·선물/판매/기부(`GIFTED`)·분실(`CONSUMED`)·용량(`250ml`/`375ml HB`/`500ml`/`1500ml`)·외화 메모(`fxNote`) 자동 파싱
-  * `첫소비일` (`M`) → `YYMMDD` 정규화 (`230600`→`2023-06-01`, `220000`→`2022-01-01`, `230000`→`2023-01-01`, 불확실 날짜 추정 규칙 적용)
-  * `소비수량` (`N`) → 소비(`CONSUMED`) 또는 선물·양도(`GIFTED`) 병 수 $M$ (별도 날짜 기록이 없는 병은 `첫소비일`을 중복 허용해 채움)
-  * `총금액` (`O`) / `From_230218` (`P`) → 엑셀 헤더 검증 셀 `R1`(보유 총 병수), `T1`(보유 총 금액), `V1`(`=SUM(O:O)` 전체 누적 지출액) 기준에 맞춰 `includeInTrackingSince` 판정 및 교차 검증
-* **`셀러위치` 시트 매핑 (일반 표 + PivotTable 자동 대응):**
-  * 피벗 테이블 형태의 `셀러위치` 시트(`D`열 최대 정원 + `F`열 `SUMIF`)를 자동 해석해 실제 선반 24개의 정원을 추출하고, 물리적 배치 순서(**`삼성 1-1~2-7 → LG 1-1~3-2 → 냉장고 신선 → 거실`**)로 `sortOrder`를 부여합니다.
-
-### 6.2 행 → 개별 병(`BottleInstance`) 전개 규칙
-* **`WineMaster` 중복 병합:** `(trim(와인명).toLowerCase(), vintage, bottleSizeMl, color)` 키로 마스터를 생성·재사용합니다(`color` 포함으로 동명 레드/화이트 오병합 차단).
-* **보유 병 생성 ($N$ = `수량`):** $N$개의 `BottleInstance`(`status: 'IN_STOCK'`, `locationId` 매핑)를 생성합니다.
-* **소비/선물 병 생성 ($M$ = `소비수량`):** $M$개의 `BottleInstance`와 각 1개의 `TastingRecord`를 생성합니다.
-  * `비고`의 쉼표/슬래시 구분 이벤트 중 왼쪽을 최신으로 매핑하고, `선물`/`생선`/`양도`/`판매`/`기부`/`도네`가 포함된 개별 병만 `GIFTED`로 분리합니다(구매처가 `지인선물` 등 선물 받은 와인은 유지).
-  * 별도 소비일이 없는 병은 `첫소비일`을 중복 허용하여 채웁니다.
-
-### 6.3 3단계 국가·지역·세부지역 자동 매핑 (`REGION_MAP` + `DETAILED_ORIGIN_RULES`)
-* **1단계 국가(`country`) → 2단계 지역(`region`) → 3단계 세부지역(`subRegion`, 선택)** 계층으로 정규화합니다.
-* 상위에서 끝나는 등급(`Vin de France` → `프랑스 / 프랑스`, `Bordeaux AOC` → `프랑스 / 보르도`, `Toscana IGT` → `이탈리아 / 토스카나`)은 `subRegion`을 비워둡니다.
-* 대지역(`부르고뉴`, `보르도`, `토스카나`, `피에몬테`, `나파`, `모젤` 등)을 검색·필터링하면 하위 모든 마을·밭·프리미어크뤼·그랑크뤼(`에세죠`, `볼네`, `샤블리`, `생줄리앙`, `뽀이약`, `볼게리`, `몬탈치노` 등)가 자동으로 함께 조회됩니다.
-
-### 6.4 스크립트 실행 방법 및 산출물 2종
-```bash
-python3 local_migration_script \
-  --input ~/Documents/wine-backup/wine_list.xlsx \
-  --out-json wine_db.json \
-  --out-report migration_review.md
-# (선택) 로컬 보정 파일이 있는 경우: --overrides ~/Documents/wine-backup/migration_overrides.local.json
-```
-1. **`wine_db.json`:** 웹앱 `JSON 가져오기`로 즉시 임포트 가능한 스키마 v1 준수 JSON.
-2. **`migration_review.md`:** 추후 보정이 필요한 항목만 카테고리별로 정리한 리포트:
-   * `[정합성 검증표]` 엑셀 원본 헤더 합계(`총 병수`, `총 금액`, `230218이후총금액`) vs 변환 JSON 집계 비교 (**보정 전 원본 기준 0원 일치 확인** + 개별 단가 분할/수량 보정 오버라이드 적용 시 의도된 차액 근거 병기)
-   * `[날짜 미상/확인필요]` `구입일`이 `?`이거나 `구입일확인필요` 메모가 있는 행
-   * `[복수 구매처·단가 혼재 의심]` `비고`에 `추가`, `+`, `*`, 다중 구매처(`,`) 등이 있는 행
-   * `[미확인 위치]` 보유 수량 > 0이나 `위치`가 `xxx??`, `x`, 공백, 미등록 선반인 행
-   * `[미분류 지역]` `country === '미분류'`인 지역 목록
-   * `[선물·양도 추정 및 분할 소비]` `GIFTED`로 분류했거나 `소비수량 >= 2`인 행
+* **스크립트 아카이브 (Public 저장소 보안 강화):** 일회성 엑셀 변환 스크립트와 전용 의존성 파일에는 개인 엑셀 구조·메모 파싱 규칙이 포함되어 있었으므로, 이관 완료 후 **로컬 개인 백업 폴더에 복사 보관하고 Git 저장소·이력에서 영구 제거**했습니다.
+* **하위 호환 및 산지·이관 규약 유지:**
+  * 이미 이관된 `wine_db.json` 호환을 위해 `BottleInstance.legacyRowNumber?: number` 옵셔널 필드는 스키마(`src/types/schema.ts`, `src/types/validation.ts`)에 그대로 유지합니다.
+  * 3단계 산지 계층(`country` → `region` → `subRegion?`, 상위에서 끝나는 등급은 `subRegion` 생략)과 4중 마스터 병합 키(`(name, vintage, bottleSizeMl, color)`), `IN_STOCK`/`CONSUMED`/`GIFTED` 상태 모델은 앱 도메인 계층에서 계속 일관되게 적용됩니다.
+  * `.gitignore`의 개인 데이터 차단 규칙(`*.xlsx`, `wine_db*.json`, `migration_review*.md`, `*.local.json`)은 그대로 유지합니다.
+  * 기존 백업 `wine_db.json` 복원 및 외부 JSON 적용은 앱 내 **온보딩 `[기존 wine_db.json 가져오기]`** 또는 **설정 `[JSON 파일로 덮어쓰기 (Import)]`**를 사용합니다.
 
 ---
 
@@ -230,6 +189,8 @@ python3 local_migration_script \
    * **2-3A (앱 내 촬영/업로드):** 클라이언트 Canvas 자동 압축(`imageProcessor.ts`: 라벨 500px / 시음 1024px WebP, JPEG 폴백), Drive `JH_Wine_Forest/photos/` + `LocalOnlyAdapter` IndexedDB `photoCache`(DB v2) 오프라인 캐시, 스토어 `authRevision` 연동으로 재인증 시 미캐싱 Drive 사진 자동 재로딩, 삭제/복원/병합/초기화 시 미참조 고아 사진 정리, `<WineThumbnail />` 실이미지(`w-[52px] h-[74px]` 고정), 라벨 등록/교체/삭제, 시음 사진(최대 3장) 첨부 및 `PhotoLightbox` 확대 뷰어 구현.
    * **2-3B (기존 와인 라벨 일괄 검색·사용자 컨펌 도구):** `scripts/label_review_tool.py`로 **빈티지 구분 없이 `(와인명, 색상)` 단위로 통합**해 공개 API(Open Food Facts / Wikimedia Commons, 선택: `--local-dir` 3자 미만 파일명 제외 및 500px WebP 압축 강제, `--google-cse-key`/`--google-cse-cx`, `--serpapi-key`) 후보 탐색 + 브라우저 검수 HTML(`label_review.html`: XSS 방어 DOM 바인딩, IndexedDB 대용량 자동 저장 및 용량 초과 경고 배너, 후보 선택, 클립보드 `Cmd+V`, 드래그&드롭, 500px WebP 번들 `approved_labels.json` 내보내기) 생성 → 웹앱 **설정 → `[승인된 라벨 일괄 적용]`** (3버튼 확인 모달 · 부분 라벨 그룹 1라벨 동기화 · 401/429 즉시 중단 및 완료분 커밋)으로 `drive.file` 권한 내 일괄 업로드 및 동일 와인 전체 빈티지 공통 연결.
    * **스키마 & 검증 보강:** `wineMasterSchema`에 `drinkingWindowStart <= drinkingWindowEnd` 교차 검증, `wineDatabaseSchema`에 실달력 날짜 검증(`2025-02-31` 차단)·4개 테이블 중복 Primary Key 차단·`tasting.bottleId` 1:1 유일성 검증 추가 (`tastingRecordSchema.rating`은 `schemaVersion: 1` 하위호환을 위해 `0..100` 유지, UI에서 5점 초과 시 `점` 표기). `commitMutation()`은 상태/IndexedDB 쓰기 전에 Zod 검증을 선행하고 `mutationRevision` 기반 lazy snapshot 직렬화로 동시 쓰기 자가 충돌을 방지합니다.
+4. **다중 와인 보틀 누끼 분할 & 하이브리드 1-B OCR 도구 (Phase 1 완료 — [SPEC_BOTTLE_CUTOUT.md](./SPEC_BOTTLE_CUTOUT.md)):**
+   * `scripts/bottle_cutout_tool.py` · `scripts/mac_vision_ocr.swift` · `scripts/requirements_cutout.txt`로 기존 앱 코드(`src/`, `ios/`, `android/`) 무수정 상태에서 대용량 사진 사전 선별(`--prefilter`/`--prefilter-only`: YOLO 앞줄 주피사체 병 탐지·라플라시안 선명도·dHash 연사 중복 제거·2~8병 모임샷 우선 정렬·`prefilter_cache.json`), 배치 슬라이싱(`--batch-size`/`--batch-index`), 기등록 라벨 제외(`--skip-existing-labels`), 셀러 매칭 전용(`--auto-match-only`), 즉시 서버 재개(`--serve-only` · `--unlabeled-first`), 다병 세움 사진 좌→우 자동 분할(COCO ONNX `class_id == 39` + 크기순 최대 15병 + 알파 상단 넥 프로젝션 밸리 폴백 + 이미 투명한 RGBA 입력 시 `rembg` 스킵), 병별 인접 엣지 억제·반사 홀 메우기·불량 실루엣(`>= 1.6`) 및 0줄 OCR 자동 폐기·`350×500` 투명 RGBA WebP 정규화, 1-B 하이브리드 OCR(무료 오프라인 macOS Vision / Windows RapidOCR + 선택 Gemini 폴백), 고유 와인명 토큰 검증 포함 불어·한글 음차 `wine_db.json` 퍼지 매칭, 10장 체크포인트 저장·와인별 베스트 1장 자동 선정, `127.0.0.1` 4-탭 로컬 리뷰 서버(`/api/boxes` 즉시 자동 저장 · 0개 박스 `/api/recut` · 탭 2 `현재 화면 미결정 일괄 확정`(`/api/bulk-approve`) & 제한 없는 전체 DB 악센트/산지 검색 · 탭 3 `중복 와인 대표 고르기`(`/api/select-representative`, `/api/exclude-group`) · 탭 4 `라벨 없는 와인 역방향 매칭`[`build_cutout_pool`/`plan_unmatched_backfill_targets` 확장형 풀 · Top-6 추천 · 전체 누끼 갤러리 모달 · 드롭/`Cmd+V` 500px WebP 업로드 · 1단계 수동누끼 왕복 연결 · `*_unlabeled.json` 분리 내보내기]) 및 `approved_labels.json` (`approvedLabelsBundleSchema` v1) 내보내기를 제공합니다.
 
 ---
 
@@ -247,9 +208,10 @@ wine-forest/
 │   ├── icons/                      # PWA 아이콘 (192x192, 512x512, apple-touch-icon)
 │   └── favicon.svg                 # JH Wine Forest 심볼 (포레스트 + 와인글라스 미니멀 SVG)
 ├── scripts/
-│   ├── local_migration_script            # wine_list.xlsx -> wine_db.json + migration_review.md
 │   ├── label_review_tool.py        # Phase 2-3B 기존 와인 라벨 일괄 검색 · 사용자 컨펌 HTML 생성기
-│   └── requirements.txt            # openpyxl
+│   ├── bottle_cutout_tool.py       # 다중 와인 보틀 누끼 분할 · 하이브리드 1-B OCR · 127.0.0.1 4-탭 리뷰 서버
+│   ├── mac_vision_ocr.swift        # macOS VNRecognizeTextRequest 배치 OCR CLI 헬퍼
+│   └── requirements_cutout.txt     # 보틀 누끼 도구 전용 가상환경(rembg, onnxruntime, Pillow, numpy, scipy, pillow-heif)
 ├── src/
 │   ├── components/
 │   │   ├── common/                 # PriceText(FxNoteText·MemoText 포함), WineColorBadge, WineThumbnail, StarRating, PhotoLightbox, BottomSheet(공용 모달 스택), ConfirmDialog, ConflictModal, SyncBadge, ToastBar
@@ -310,12 +272,14 @@ wine-forest/
 │   ├── phase2.test.tsx             # Phase 2 음용 적기·별점/시음노트·이미지 리사이징·라벨 일괄 적용·안정화 회귀 검증
 │   ├── authAdapter.test.ts         # 웹 GIS 호환·네이티브 무음 복원·401 재시도·동시 갱신 dedupe 검증
 │   ├── auditFixes.test.tsx         # 전수 감사 회귀 검증(스키마·도메인·통계·동시성·복원·모달스택·프라이버시·스테일상태)
-│   └── shareLink.test.tsx          # 무서버 공유 코덱·프라이버시 원천 제거·512KB/Zod 방어·만료·ShareListModal·SharedListPage 검증
+│   ├── shareLink.test.tsx          # 무서버 공유 코덱·프라이버시 원천 제거·512KB/Zod 방어·만료·ShareListModal·SharedListPage 검증
+│   └── test_bottle_cutout.py       # 보틀 누끼 다병 분할·인접 억제·350x500 WebP·다국어 퍼지 매칭·approved_labels·리뷰 서버·macOS Vision 검증
 ├── docs/
 │   ├── SPEC_1_UI_ARCH.md           # 웹 작업지시서 1부
 │   ├── SPEC_2_DATA_EXEC.md         # 웹 작업지시서 2부
 │   ├── IMPLEMENTATION_PLAN.md      # 최종 구현 계획·완료 명세·안정화/감사 현황
 │   ├── SPEC_SHARE_LINK.md          # 무서버 읽기 전용 리스트 공유 링크 작업지시서
+│   ├── SPEC_BOTTLE_CUTOUT.md       # 다중 와인 보틀 누끼 분할 & OCR 매칭 작업지시서 (Phase 1/2)
 │   ├── MOBILE_IMPLEMENTATION_PLAN.md # 모바일(iOS/Android) 마스터 계획
 │   ├── SPEC_MOBILE_IOS.md          # Mac·iOS 개발 작업지시서
 │   └── GUIDE_WIN_ANDROID.md        # Windows Android 빌드 실전 가이드
@@ -372,24 +336,23 @@ Antigravity(Gemini Neon)는 아래 **6개 마일스톤**을 순서대로 완료�
 * `SettingsPage`: 동기화, 수동 백업/복원 목록, JSON 내보내기/가져오기, 기준일 설정.
 * **검증:** `tests/statsCalculator.test.ts` 작성(보유/소비/선물/230218 합산/평균가/프라이버시 검증) 및 통과.
 
-### Milestone 5: 기존 엑셀 마이그레이션 스크립트 (`일회성 로컬 이관 스크립트`)
-* `openpyxl` 기반 `일회성 로컬 이관 스크립트` 및 `scripts/requirements.txt` 작성.
-* `와인리스트` + `셀러위치` 파싱, 3단계 국가·지역·세부지역 매핑 사전, `수량`/`소비수량` 개별 병 전개, `From_230218` 매칭, `migration_review.md` 자동 생성 및 1원 단위 정합성 검증 출력 구현.
-* **검증:** 합성 샘플 엑셀(엣지케이스: `NV`, `?` 날짜, `YYMMDD`, 다수량+부분소비, `HB`, `선물로변신`, `xxx??`, 미분류 지역 포함)로 실행해 생성된 JSON이 웹앱 Zod 스키마를 통과하는지 검증 후 임시 샘플 파일 삭제.
+### Milestone 5: 초기 엑셀 마이그레이션 (완료 및 로컬 아카이브)
+* 초기 1회 엑셀 → `wine_db.json` (3단계 국가·지역·세부지역, 개별 병 전개, `From_230218` 매칭, Zod 검증 통과) 이관 완료.
+* 이관 완료 후 Public 저장소 프라이버시 보호를 위해 일회성 엑셀 이관 스크립트 및 전용 의존성 파일은 로컬 개인 백업 폴더로 분리 보관하고 Git 저장소·이력에서 영구 제거.
 
 ### Milestone 6: 최종 통합 검증, PWA 점검 및 GitHub Actions 구성
 * `.github/workflows/deploy.yml` 작성.
 * 프로덕션 빌드 및 미리보기(`npm run build && npm run preview`)로 `HashRouter`, PWA 매니페스트/서비스워커, 콘솔 에러 0건 확인.
-* `README.md` 작성 (로컬 실행, GitHub Secrets 등록법, `일회성 로컬 이관 스크립트` 실행 및 앱 최초 Import 가이드 포함).
+* `README.md` 작성 (로컬 실행, GitHub Secrets 등록법, `wine_db.json` 앱 Import 가이드 포함).
 
 ---
 
 ## 10. 최종 완료 기준 (Definition of Done — 검증 완료)
 
-- [x] `npm run test` 모든 단위 테스트(스키마, 230218 통계·3단계 산지, 충돌 감지·주 1회 백업, 프라이버시 마스킹, 스토어 도메인 변이, Phase 2·안정화 회귀, 웹/네이티브 인증 어댑터, 전수 감사 및 Android/공통 회귀, 무서버 공유 링크) 100% 통과 (**9 suites / 69 tests**)
+- [x] `npm run test` 모든 단위 테스트(스키마, 230218 통계·3단계 산지, 충돌 감지·주 1회 백업, 프라이버시 마스킹, 스토어 도메인 변이, Phase 2·안정화 회귀, 웹/네이티브 인증 어댑터, 전수 감사 및 Android/공통 회귀, 무서버 공유 링크) 100% 통과 (**9 suites / 69 tests**) + `tests/test_bottle_cutout.py` Python 단위·통합 테스트 100% 통과 (**19 tests**)
 - [x] `useWineStore` 포그라운드 복귀 조용한 자동 동기화(`syncOnForegroundResume` 30초 쓰로틀 + `syncNow({ silent: true })`, 미동기화·충돌 시 Pull 차단) 및 도메인 변이(`addBottles`/`consumeOrGiftBottle`/`updateTastingRecord`) `CommitResult` 반환 검증 완료
 - [x] `npm run build` TypeScript/Vite 에러 및 경고 없이 완료, PWA 서비스워커(`dist/sw.js`) 정상 생성
 - [x] 모바일(`390×844`)과 데스크톱(`1440×900`) 양쪽에서 라이트/다크 모드 모두 대비·가독성 결함 없음 (화이트 연노랑 `#F3EED4`/`#EFEAD0` 다크 텍스트 대비 포함)
 - [x] 프라이버시 토글(`👁️`) ON 시 앱 내 모든 페이지·모달·외화 메모(`<FxNoteText />`)·비고/메모 원문(`<MemoText />`)·차트(가격대 분포 오버레이 포함)에서 금액 정보 100% 마스킹 확인
-- [x] Public 저장소(`wine-forest`)에 실제 개인 와인 데이터나 OAuth Client ID 하드코딩 없음 (`.gitignore` 차단 완료)
-- [x] `일회성 로컬 이관 스크립트` 실행 시 `wine_db.json`(초기 이관 완료, 3단계 산지, 소비일 결측 0건)과 `migration_review.md`가 정상 생성되고 웹앱 Zod Import 통과
+- [x] Public 저장소(`wine-forest`)에 실제 개인 와인 데이터나 OAuth Client ID 하드코딩 없음 (`.gitignore` 차단 및 일회성 엑셀 이관 스크립트 로컬 아카이브·저장소·이력 영구 제거 완료)
+- [x] 초기 엑셀 마이그레이션으로 생성된 `wine_db.json`의 웹앱 Zod Import 및 Google Drive 동기화 검증 완료

@@ -33,6 +33,7 @@ venv/
 # CRITICAL: Personal Wine Data & Secrets (Public Repo Guardrail)
 *.xlsx
 *.xls
+*migrate_excel*
 wine_db*.json
 migration_review*.md
 approved_labels*.json
@@ -42,6 +43,12 @@ label_review*/
 .env
 .env.*
 !.env.example
+
+# Bottle Cutout Tool Local Work Artifacts (Public Repo Guardrail)
+scripts/.venv_cutout/
+scripts/cutout_work/
+raw_photos/
+*.onnx
 
 # Mobile Native Secrets & Signing Artifacts (Public Repo Guardrail)
 ios/App/Config/Local.xcconfig

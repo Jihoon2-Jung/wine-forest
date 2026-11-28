@@ -2,7 +2,7 @@
 
 > **문서 안내:** 본 프로젝트의 마스터 작업지시서는 두 파일로 구성됩니다.
 > - **1부 (`SPEC_1_UI_ARCH.md`):** 프로젝트 확정 사항, 기술 스택, 보안 규칙, 유명 와인 앱 UI/UX 벤치마크, 디자인 시스템, 화면별 기능 명세
-> - **2부 (`SPEC_2_DATA_EXEC.md`):** `wine_db.json` 스키마, 오프라인/동기화/충돌방지/주 1회 자동백업, 기존 엑셀 마이그레이션 스크립트, 디렉터리·CI/CD, 마일스톤 실행 계획 및 완료 기준
+> - **2부 (`SPEC_2_DATA_EXEC.md`):** `wine_db.json` 스키마, 오프라인/동기화/충돌방지/주 1회 자동백업, 초기 데이터 이관 정책, 디렉터리·CI/CD, 마일스톤 실행 계획 및 완료 기준
 >
 > **에이전트 실행 지침:** 구현을 시작하기 전에 반드시 **1부와 2부를 모두 끝까지 정독**한 뒤, 2부의 Milestone 1부터 6까지 순서대로 구현 및 자가 검증을 진행하십시오.
 
@@ -27,7 +27,7 @@
 | **병 상태** | 3종: `IN_STOCK`(보유), `CONSUMED`(소비완료 · 분실 포함), `GIFTED`(선물 · 양도 · 판매 · 기부) |
 | **핵심 통계 지표** | 보유 현황, 소비/선물 분리 통계, **관리 시작일(`2023-02-18`) 이후 누적 지출액(`From_230218` — 기존 엑셀 `V1` 기준 전체 누적 일치)** 유지 |
 | **로컬 테스트 모드** | OAuth Client ID 없이도 IndexedDB 기반 `LocalOnlyAdapter` 병행 지원 (Google Drive 전환 시 기존 파일 충돌 확인 모달 제공) |
-| **초기 데이터 이관** | PC 실행형 Python 스크립트(`일회성 로컬 이관 스크립트`)로 `wine_list.xlsx` → `wine_db.json` + 검수 리포트 생성 후 웹앱 Import |
+| **초기 데이터 이관** | 초기 1회 엑셀 → `wine_db.json` 이관 완료 후 일회성 마이그레이션 스크립트는 Public 저장소에서 제거(로컬 개인 백업 폴더에 보관), 앱 내 `wine_db.json` Import/Export 지원 |
 | **개발 단계** | **1차 MVP + Phase 2 전체 (2-1 음용 적기 · 2-2 별점/시음노트 · 2-3A 앱 내 사진 · 2-3B 기존 와인 라벨 일괄 검색·컨펌 도구)** 완결 구현 |
 
 ---
@@ -44,7 +44,7 @@
 * **Icons & Charts:** `lucide-react` (아이콘), `recharts` (통계 차트)
 * **Validation:** `zod` (JSON 스키마 런타임 검증 — Import 및 Drive Load 시 데이터 손상 차단)
 * **Testing:** `vitest` + `@testing-library/react`
-* **Migration Script:** Python 3.11+ (`openpyxl`)
+* **Utility Scripts:** Python 3.11+ (`label_review_tool.py`, `bottle_cutout_tool.py` — 일회성 엑셀 마이그레이션 스크립트는 초기 이관 완료 후 로컬 백업 폴더로 분리 보관)
 
 ### 1.2 Public 저장소 보안 절대 규칙 (CRITICAL)
 1. **개인 데이터 커밋 절대 금지:** `wine-forest`는 Public 저장소입니다. 실제 와인 목록, 개인 메모, 엑셀 원본(`*.xlsx`), 변환된 DB(`wine_db*.json`), 검수 리포트(`migration_review*.md`)는 절대 저장소에 포함하지 않습니다. `.gitignore`에 반드시 차단 규칙을 명시합니다.

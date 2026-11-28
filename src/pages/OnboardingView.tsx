@@ -175,7 +175,7 @@ export function OnboardingView() {
           <div className="flex items-start gap-2 rounded-xl border border-subtle bg-elevated/60 p-3 text-[11px] leading-relaxed text-secondary">
             <Info className="mt-0.5 h-4 w-4 shrink-0 text-forest" />
             <span>
-              최소 권한(<code>drive.file</code>) 보안 정책상, <code>기존 백업 도구</code>로 만든{' '}
+              최소 권한(<code>drive.file</code>) 보안 정책상, 기존 백업 또는 마이그레이션으로 준비한{' '}
               <code>wine_db.json</code>은 Google Drive 웹에서 직접 올리지 말고 반드시{' '}
               <strong className="text-primary">이 앱의 [JSON 가져오기] 버튼</strong>으로 업로드해 주세요.
             </span>
